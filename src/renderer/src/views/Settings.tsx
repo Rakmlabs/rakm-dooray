@@ -4,6 +4,7 @@ import { call, errorText } from '../api'
 import { useApp } from '../state'
 import { ChatSettings } from '../components/chat/ChatSettings'
 import { FileSettings } from '../components/files/FileSettings'
+import { AppearanceSettings, NotificationSettings, Shortcuts, StorageSettings, WindowSettings } from '../shell/ShellSettings'
 
 // 메일 설정(IMAP/SMTP)은 지금 쓰지 않아 화면에서 뺐다 (Free 플랜이라 IMAP 불가). main 쪽 코드와 IPC 는 남아 있다.
 
@@ -115,26 +116,13 @@ export function SettingsView() {
         </div>
       </form>
 
+      <AppearanceSettings />
+      <NotificationSettings />
       <ChatSettings />
       <FileSettings />
-
-      <div className="card">
-        <h2>단축키</h2>
-        <ul className="keys">
-          <li>
-            <kbd>⌘/Ctrl 1·2</kbd> 메신저·위키
-          </li>
-          <li>
-            <kbd>⌘/Ctrl ,</kbd> 설정
-          </li>
-          <li>
-            <kbd>Enter</kbd> 보내기, <kbd>Shift+Enter</kbd> 줄바꿈
-          </li>
-          <li>
-            <kbd>Esc</kbd> 답장·수정·스레드 닫기
-          </li>
-        </ul>
-      </div>
+      <WindowSettings />
+      <StorageSettings />
+      <Shortcuts />
     </div>
   )
 }

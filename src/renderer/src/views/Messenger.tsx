@@ -1,50 +1,81 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import type { Channel, Member, Message, ProjectGroup } from '@shared/types'
-import { call, errorText, onEvent } from '../api'
+import type { ChannelSummary } from '@shared/types-shell'
+import { call, errorText } from '../api'
 import { rememberMember, useApp, useMemberNames } from '../state'
 import { useChannelLogs, useInterval } from '../lib/hooks'
 import {
   channelTitle,
   collectThreads,
+  directPartner,
+  findDirectChannel,
   formatTopic,
   groupChannels,
-  isUnread,
+  moveInOrder,
   nextColor,
+  parseTopic,
   sameProject,
   threadTime,
+  unreadCount,
+  type ChannelSection,
   type ThreadEntry
 } from '../lib/projects'
 import { formatTime } from '../lib/format'
+import { onNav } from '../lib/nav'
 import { MessageList } from '../components/MessageList'
 import { FileDropArea } from '../components/files/FileDropArea'
 import { FileGallery } from '../components/files/FileGallery'
 import { Composer } from '../components/Composer'
 import { ThreadPanel, type OpenThread } from '../components/ThreadPanel'
+import { rememberReply } from '../components/chat/chatStore'
 import { Modal } from '../components/Modal'
 import { Icon } from '../components/Icon'
+import { Avatar } from '../components/people/Avatar'
+import { matchScore } from '../shell/match'
+import { pushRecent } from '../shell/recent'
+import { navHistory } from '../shell/history'
+import { openSearch } from '../shell/overlay'
 
 type Selection = { kind: 'channel'; id: string } | { kind: 'project'; id: string } | null
+type Dialog =
+  | { kind: 'projects' }
+  | { kind: 'newChannel' }
+  | { kind: 'direct'; memberId: string }
+  | { kind: 'projectTopic'; projectId: string }
+  | null
+
+const DRAG_TYPE = 'application/x-rakm-channel'
 
 export function MessengerView({ active }: { active: boolean }) {
-  const { ui, updateUi, settings } = useApp()
+  const { ui, updateUi, settings, shell, updateShell, unread } = useApp()
   const nameOf = useMemberNames()
   const [channels, setChannels] = useState<Channel[]>([])
+  const [loaded, setLoaded] = useState(false)
   const [me, setMe] = useState<Member | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selection, setSelection] = useState<Selection>(null)
   const [thread, setThread] = useState<OpenThread | null>(null)
   const [filter, setFilter] = useState('')
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(['hidden']))
-  const [activity, setActivity] = useState<Set<string>>(new Set())
-  const [dialog, setDialog] = useState<'projects' | 'newChannel' | null>(null)
+  const [dialog, setDialog] = useState<Dialog>(null)
+  /** 대화방을 열 때 받아 둔 "여기까지 읽음" 시각 */
+  const [readMarker, setReadMarker] = useState<{ channelId: string; at: string | null } | null>(null)
+  /** 검색·알림에서 온 메시지 위치 */
+  const [focusMsg, setFocusMsg] = useState<{ channelId: string; messageId: string } | null>(null)
+  const pendingNav = useRef<Parameters<Parameters<typeof onNav>[0]>[0] | null>(null)
+  const restored = useRef(false)
   const configured = !!settings && settings.dooray.tokenSource !== 'none'
+  const layout = shell?.layout
 
   const loadChannels = useCallback(async () => {
     try {
-      setChannels(await call('messenger:channels'))
+      const list = await call('messenger:channels')
+      setChannels(list)
+      setLoaded(true)
       setError(null)
+      return list
     } catch (e) {
       setError(errorText(e))
+      return null
     }
   }, [])
 
@@ -59,40 +90,112 @@ export function MessengerView({ active }: { active: boolean }) {
       .catch(() => {})
   }, [loadChannels, configured, settings?.dooray.apiBase])
 
-  // 채널 목록은 30초마다 (안 읽음 표시용, 근사치)
+  // 채널 목록은 30초마다 (main 이 그 사이 대화방을 돌며 안 읽음·알림을 계산한다)
   useInterval(() => void loadChannels(), 30_000, configured)
-
-  useEffect(
-    () =>
-      onEvent('messenger:activity', (a) => {
-        setActivity((s) => (s.has(a.channelId) ? s : new Set(s).add(a.channelId)))
-      }),
-    []
-  )
 
   const selectedChannel = selection?.kind === 'channel' ? (channels.find((c) => c.id === selection.id) ?? null) : null
 
   const openChannel = useCallback(
-    (c: Channel) => {
+    (c: Channel, opts: { messageId?: string; record?: boolean } = {}) => {
       setSelection({ kind: 'channel', id: c.id })
       setThread(null)
-      setActivity((s) => {
-        if (!s.has(c.id)) return s
-        const n = new Set(s)
-        n.delete(c.id)
-        return n
-      })
+      setFocusMsg(opts.messageId ? { channelId: c.id, messageId: opts.messageId } : null)
+      if (opts.record !== false) navHistory.push({ kind: 'channel', channelId: c.id })
+      call('shell:openChannel', c.id)
+        .then((r) => setReadMarker({ channelId: c.id, at: r.readAt }))
+        .catch(() => setReadMarker(null))
       updateUi((u) => ({ ...u, lastSeenAt: { ...u.lastSeenAt, [c.id]: c.updatedAt ?? new Date().toISOString() } }))
+      updateShell((s) => ({
+        ...s,
+        layout: {
+          ...s.layout,
+          last: { ...s.layout.last, channelId: c.id },
+          recent: pushRecent(s.layout.recent, {
+            label: channelTitle(c, nameOf),
+            sub: c.type === 'direct' ? '1:1 대화' : '대화방',
+            target: { kind: 'channel', channelId: c.id }
+          })
+        }
+      }))
     },
-    [updateUi]
+    [updateUi, updateShell, nameOf]
   )
 
-  // 보고 있는 대화방은 계속 읽음 처리
+  const openThread = useCallback(
+    (t: OpenThread) => {
+      setThread(t)
+      const topic = parseTopic(t.root?.text ?? t.title ?? '')
+      updateShell((s) => ({
+        ...s,
+        layout: {
+          ...s.layout,
+          recent: pushRecent(s.layout.recent, {
+            label: topic.title || '스레드',
+            sub: topic.project ? `[${topic.project}] 스레드` : '스레드',
+            target: { kind: 'thread', channelId: t.parentChannelId, threadChannelId: t.threadChannelId }
+          })
+        }
+      }))
+    },
+    [updateShell]
+  )
+
+  // 화면 이동 버스 (⌘K, 검색, 알림, 다른 영역)
+  const applyNav = useCallback(
+    (req: NonNullable<typeof pendingNav.current>, list: Channel[]): boolean => {
+      if (req.kind === 'channel' || req.kind === 'thread') {
+        const c = list.find((x) => x.id === req.channelId)
+        if (!c) return false
+        openChannel(c, { messageId: req.kind === 'channel' ? req.messageId : undefined, record: false })
+        if (req.kind === 'thread') setThread({ threadChannelId: req.threadChannelId, parentChannelId: c.id, root: null })
+        return true
+      }
+      if (req.kind === 'direct') {
+        const c = findDirectChannel(list, req.memberId)
+        if (c) openChannel(c, { record: false })
+        else setDialog({ kind: 'direct', memberId: req.memberId })
+        return true
+      }
+      return true
+    },
+    [openChannel]
+  )
+
+  useEffect(
+    () =>
+      onNav((req) => {
+        if (req.kind === 'wikiPage' || req.kind === 'settings') return
+        if (!applyNav(req, channels)) {
+          // 목록이 아직 없거나 새로 생긴 방이면 다시 읽고 처리한다
+          pendingNav.current = req
+          void loadChannels()
+        }
+      }),
+    [applyNav, channels, loadChannels]
+  )
+
   useEffect(() => {
-    if (!selectedChannel?.updatedAt) return
-    if (ui.lastSeenAt[selectedChannel.id] === selectedChannel.updatedAt) return
-    updateUi((u) => ({ ...u, lastSeenAt: { ...u.lastSeenAt, [selectedChannel.id]: selectedChannel.updatedAt! } }))
-  }, [selectedChannel?.id, selectedChannel?.updatedAt]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!loaded) return
+    const req = pendingNav.current
+    if (req) {
+      pendingNav.current = null
+      applyNav(req, channels)
+      return
+    }
+    // 마지막으로 보던 방 다시 열기
+    if (!restored.current && layout) {
+      restored.current = true
+      const c = layout.last.channelId ? channels.find((x) => x.id === layout.last.channelId) : null
+      if (c && !selection) openChannel(c, { record: true })
+    }
+  }, [loaded, channels]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 지금 보이는 방을 main 에 알린다 (그 방은 알림을 띄우지 않고 읽음으로 둔다)
+  const viewing = active && selection?.kind === 'channel' ? selection.id : null
+  useEffect(() => {
+    void call('shell:viewing', viewing).catch(() => {})
+  }, [viewing])
+  useEffect(() => () => void call('shell:viewing', null).catch(() => {}), [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -102,8 +205,58 @@ export function MessengerView({ active }: { active: boolean }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [thread, active])
 
-  const sections = useMemo(() => groupChannels(channels, ui), [channels, ui])
-  const q = filter.trim().toLowerCase()
+  const sections = useMemo(() => groupChannels(channels, ui, layout ?? { favorites: [], order: {} }), [channels, ui, layout])
+  const q = filter.trim()
+  const collapsed = new Set(layout?.collapsed ?? ['hidden'])
+  const muted = new Set(shell?.prefs.notify.muted ?? [])
+
+  const toggleSection = (key: string) =>
+    updateShell((s) => {
+      const set = new Set(s.layout.collapsed)
+      if (set.has(key)) set.delete(key)
+      else set.add(key)
+      return { ...s, layout: { ...s.layout, collapsed: [...set] } }
+    })
+
+  // ---------- 끌어서 순서 바꾸기 / 폴더로 옮기기 ----------
+  const [drag, setDrag] = useState<{ id: string; from: string } | null>(null)
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | { section: string } | null>(null)
+
+  const dropOnRow = (section: ChannelSection, targetId: string, after: boolean) => {
+    if (!drag) return
+    const ids = section.channels.map((c) => c.id)
+    if (drag.from !== section.key) {
+      moveToSection(drag.id, section.key)
+      if (!ids.includes(drag.id)) ids.push(drag.id)
+    }
+    const next = moveInOrder(ids, drag.id, targetId, after)
+    updateShell((s) =>
+      section.key === 'fav'
+        ? { ...s, layout: { ...s.layout, favorites: next } }
+        : { ...s, layout: { ...s.layout, order: { ...s.layout.order, [section.key]: next } } }
+    )
+  }
+
+  /** 다른 섹션 머리글에 놓으면: 즐겨찾기 고정 / 프로젝트 폴더에 넣기 / 미분류로 빼기 */
+  const moveToSection = (id: string, key: string) => {
+    const fromFav = layout?.favorites.includes(id)
+    if (key === 'fav') {
+      if (!fromFav) updateShell((s) => ({ ...s, layout: { ...s.layout, favorites: [...s.layout.favorites, id] } }))
+      return
+    }
+    if (fromFav) updateShell((s) => ({ ...s, layout: { ...s.layout, favorites: s.layout.favorites.filter((x) => x !== id) } }))
+    if (key.startsWith('p:')) {
+      updateUi((u) => ({ ...u, channelProject: { ...u.channelProject, [id]: key.slice(2) }, hiddenChannels: u.hiddenChannels.filter((x) => x !== id) }))
+    } else if (key === 'direct' || key === 'other') {
+      updateUi((u) => {
+        const channelProject = { ...u.channelProject }
+        delete channelProject[id]
+        return { ...u, channelProject, hiddenChannels: u.hiddenChannels.filter((x) => x !== id) }
+      })
+    } else if (key === 'hidden') {
+      updateUi((u) => ({ ...u, hiddenChannels: u.hiddenChannels.includes(id) ? u.hiddenChannels : [...u.hiddenChannels, id] }))
+    }
+  }
 
   if (!configured) {
     return (
@@ -113,79 +266,127 @@ export function MessengerView({ active }: { active: boolean }) {
     )
   }
 
+  const recentThreads = (layout?.recent ?? []).filter((r) => r.target.kind === 'thread').slice(0, 8)
+
   return (
     <div className="cols">
       <aside className="list-col" aria-label="대화방 목록">
         <div className="pane-head">
           <input
             className="search"
-            placeholder="대화방 찾기"
+            placeholder="대화방 찾기 (초성 가능)"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             aria-label="대화방 찾기"
           />
-          <button className="icon-btn" title="프로젝트 관리" aria-label="프로젝트 관리" onClick={() => setDialog('projects')}>
+          <button className="icon-btn" title="프로젝트 관리" aria-label="프로젝트 관리" onClick={() => setDialog({ kind: 'projects' })}>
             <Icon name="tag" size={16} />
           </button>
-          <button className="icon-btn" title="새 대화방" aria-label="새 대화방" onClick={() => setDialog('newChannel')}>
+          <button className="icon-btn" title="새 대화방" aria-label="새 대화방" onClick={() => setDialog({ kind: 'newChannel' })}>
             <Icon name="plus" size={16} />
           </button>
         </div>
         {error && <div className="banner banner-err">{error}</div>}
-        <div className="list-scroll">
+        <div className="list-scroll" onDragEnd={() => (setDrag(null), setDropAt(null))}>
           {sections.map((s) => {
-            const list = q ? s.channels.filter((c) => channelTitle(c, nameOf).toLowerCase().includes(q)) : s.channels
-            if (!s.project && list.length === 0) return null
+            const list = q ? s.channels.filter((c) => matchScore(channelTitle(c, nameOf), q) > 0) : s.channels
+            if (!s.project && list.length === 0 && !(s.key === 'fav' && drag)) return null
             const isCollapsed = collapsed.has(s.key) && !q
+            const sectionUnread = list.reduce((n, c) => n + (muted.has(c.id) ? 0 : unreadCount(unread.summaries, c.id, viewing)), 0)
+            const isDropSection = !!dropAt && 'section' in dropAt && dropAt.section === s.key
             return (
-              <div key={s.key} className="section">
-                <div className="section-head">
-                  <button
-                    className="section-toggle"
-                    aria-expanded={!isCollapsed}
-                    onClick={() =>
-                      setCollapsed((c) => {
-                        const n = new Set(c)
-                        if (n.has(s.key)) n.delete(s.key)
-                        else n.add(s.key)
-                        return n
-                      })
-                    }
-                  >
+              <div key={s.key} className={`section ${isDropSection ? 'drop-into' : ''}`}>
+                <div
+                  className="section-head"
+                  onDragOver={(e) => {
+                    if (!drag || !e.dataTransfer.types.includes(DRAG_TYPE)) return
+                    e.preventDefault()
+                    setDropAt({ section: s.key })
+                  }}
+                  onDragLeave={() => setDropAt((d) => (d && 'section' in d && d.section === s.key ? null : d))}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    if (drag && drag.from !== s.key) moveToSection(drag.id, s.key)
+                    setDrag(null)
+                    setDropAt(null)
+                  }}
+                >
+                  <button className="section-toggle" aria-expanded={!isCollapsed} onClick={() => toggleSection(s.key)}>
                     <span className={`chev ${isCollapsed ? '' : 'open'}`}>
                       <Icon name="chevron" size={12} />
                     </span>
+                    {s.key === 'fav' && (
+                      <span className="fav-star">
+                        <Icon name="star" size={12} />
+                      </span>
+                    )}
                     {s.project && <span className="dot" style={{ background: s.project.color }} />}
                     <span className="grow ellipsis">{s.title}</span>
-                    <span className="count">{list.length}</span>
+                    {isCollapsed && sectionUnread > 0 ? <span className="badge">{sectionUnread}</span> : <span className="count">{list.length}</span>}
                   </button>
                   {s.project && (
-                    <button
-                      className={`section-open ${selection?.kind === 'project' && selection.id === s.project.id ? 'active' : ''}`}
-                      onClick={() => {
-                        setSelection({ kind: 'project', id: s.project!.id })
-                        setThread(null)
-                      }}
-                      title="이 프로젝트의 스레드 모아보기"
-                    >
-                      모아보기
-                    </button>
+                    <>
+                      <button
+                        className="section-open"
+                        onClick={() => setDialog({ kind: 'projectTopic', projectId: s.project!.id })}
+                        title={`[${s.project.name}] 새 주제 열기`}
+                        aria-label={`${s.project.name} 새 주제`}
+                      >
+                        <Icon name="plus" size={12} /> 주제
+                      </button>
+                      <button
+                        className={`section-open ${selection?.kind === 'project' && selection.id === s.project.id ? 'active' : ''}`}
+                        onClick={() => {
+                          setSelection({ kind: 'project', id: s.project!.id })
+                          setThread(null)
+                        }}
+                        title="이 프로젝트의 스레드 모아보기"
+                      >
+                        모아보기
+                      </button>
+                    </>
                   )}
                 </div>
                 {!isCollapsed &&
-                  list.map((c) => (
-                    <ChannelRow
-                      key={c.id}
-                      channel={c}
-                      title={channelTitle(c, nameOf)}
-                      active={selection?.kind === 'channel' && selection.id === c.id}
-                      unread={selection?.kind !== 'channel' || selection.id !== c.id ? isUnread(c, ui, activity) : false}
-                      onOpen={() => openChannel(c)}
-                    />
-                  ))}
+                  list.map((c) => {
+                    const dropHere = !!dropAt && 'id' in dropAt && dropAt.id === c.id
+                    return (
+                      <ChannelRow
+                        key={c.id}
+                        channel={c}
+                        title={channelTitle(c, nameOf)}
+                        active={selection?.kind === 'channel' && selection.id === c.id}
+                        summary={unread.summaries[c.id]}
+                        unread={muted.has(c.id) ? 0 : unreadCount(unread.summaries, c.id, viewing)}
+                        mutedUnread={muted.has(c.id) ? unreadCount(unread.summaries, c.id, viewing) : 0}
+                        favorite={!!layout?.favorites.includes(c.id)}
+                        muted={muted.has(c.id)}
+                        dropMark={dropHere ? (dropAt as { after: boolean }).after ? 'after' : 'before' : null}
+                        onOpen={() => openChannel(c)}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData(DRAG_TYPE, c.id)
+                          e.dataTransfer.effectAllowed = 'move'
+                          setDrag({ id: c.id, from: s.key })
+                        }}
+                        onDragOver={(e) => {
+                          if (!drag || !e.dataTransfer.types.includes(DRAG_TYPE)) return
+                          e.preventDefault()
+                          const r = e.currentTarget.getBoundingClientRect()
+                          setDropAt({ id: c.id, after: e.clientY > r.top + r.height / 2 })
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault()
+                          if (dropAt && 'id' in dropAt) dropOnRow(s, c.id, dropAt.after)
+                          setDrag(null)
+                          setDropAt(null)
+                        }}
+                      />
+                    )
+                  })}
                 {!isCollapsed && s.project && list.length === 0 && (
-                  <div className="muted small pad">대화방 옆 ⋯ 버튼으로 이 프로젝트에 넣으세요.</div>
+                  <div className="muted small pad">대화방을 여기로 끌어 놓거나 ⋯ 메뉴로 넣으세요.</div>
                 )}
+                {!isCollapsed && s.key === 'fav' && list.length === 0 && <div className="muted small pad">여기에 끌어 놓으면 맨 위에 고정됩니다.</div>}
               </div>
             )
           })}
@@ -200,8 +401,10 @@ export function MessengerView({ active }: { active: boolean }) {
             title={channelTitle(selectedChannel, nameOf)}
             me={me}
             active={active}
-            onOpenThread={setThread}
-            openThreadId={thread?.threadChannelId ?? null}
+            onOpenThread={openThread}
+            openThread={thread}
+            readMarkerAt={readMarker?.channelId === selectedChannel.id ? readMarker.at : null}
+            focusMessageId={focusMsg?.channelId === selectedChannel.id ? focusMsg.messageId : null}
           />
         )}
         {selection?.kind === 'project' && (
@@ -209,31 +412,75 @@ export function MessengerView({ active }: { active: boolean }) {
             key={selection.id}
             project={ui.projects.find((p) => p.id === selection.id) ?? null}
             channels={channels}
-            onOpenThread={setThread}
+            onOpenThread={openThread}
             onOpenChannel={openChannel}
+            onNewTopic={() => setDialog({ kind: 'projectTopic', projectId: selection.id })}
             nameOf={nameOf}
           />
         )}
         {!selection && (
           <div className="empty">
-            <p>왼쪽에서 대화방을 고르세요.</p>
+            <p>왼쪽에서 대화방을 고르거나 <kbd>⌘K</kbd> 로 찾아 가세요.</p>
             <p className="muted small">
               프로젝트(⌗ 버튼)를 만들어 대화방을 묶고, 대화는 “새 주제”로 스레드를 열어 주제별로 나누세요. 주제 제목 앞의 [프로젝트] 표시는 상대방 화면에서도
               같은 프로젝트로 묶입니다.
             </p>
+            {recentThreads.length > 0 && (
+              <div className="recent-threads">
+                <div className="qs-group">최근 연 스레드</div>
+                {recentThreads.map((r) => (
+                  <button
+                    key={r.key}
+                    className="thread-row"
+                    onClick={() => r.target.kind === 'thread' && applyNav(r.target, channels)}
+                  >
+                    <div className="thread-row-top">
+                      <span className="grow ellipsis thread-title">{r.label}</span>
+                    </div>
+                    <div className="muted small">{r.sub}</div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {thread && <ThreadPanel thread={thread} meId={me?.id ?? null} onClose={() => setThread(null)} />}
 
-      {dialog === 'projects' && <ProjectsDialog onClose={() => setDialog(null)} />}
-      {dialog === 'newChannel' && (
+      {dialog?.kind === 'projects' && <ProjectsDialog onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'newChannel' && (
         <NewChannelDialog
           onClose={() => setDialog(null)}
           onCreated={async () => {
             setDialog(null)
             await loadChannels()
+          }}
+        />
+      )}
+      {dialog?.kind === 'direct' && (
+        <DirectComposeDialog
+          memberId={dialog.memberId}
+          onClose={() => setDialog(null)}
+          onSent={async () => {
+            const memberId = dialog.memberId
+            setDialog(null)
+            const list = await loadChannels()
+            const c = list ? findDirectChannel(list, memberId) : null
+            if (c) openChannel(c)
+          }}
+        />
+      )}
+      {dialog?.kind === 'projectTopic' && (
+        <ProjectTopicDialog
+          project={ui.projects.find((p) => p.id === dialog.projectId) ?? null}
+          channels={channels.filter((c) => ui.channelProject[c.id] === dialog.projectId && c.status !== 'deleted')}
+          titleOf={(c) => channelTitle(c, nameOf)}
+          onClose={() => setDialog(null)}
+          onCreated={(c, threadChannelId, topic) => {
+            setDialog(null)
+            openChannel(c)
+            openThread({ threadChannelId, parentChannelId: c.id, root: null, title: topic })
           }}
         />
       )}
@@ -247,19 +494,37 @@ function ChannelRow({
   channel,
   title,
   active,
+  summary,
   unread,
-  onOpen
+  mutedUnread,
+  favorite,
+  muted,
+  dropMark,
+  onOpen,
+  onDragStart,
+  onDragOver,
+  onDrop
 }: {
   channel: Channel
   title: string
   active: boolean
-  unread: boolean
+  summary: ChannelSummary | undefined
+  unread: number
+  mutedUnread: number
+  favorite: boolean
+  muted: boolean
+  dropMark: 'before' | 'after' | null
   onOpen: () => void
+  onDragStart: (e: DragEvent<HTMLDivElement>) => void
+  onDragOver: (e: DragEvent<HTMLDivElement>) => void
+  onDrop: (e: DragEvent<HTMLDivElement>) => void
 }) {
-  const { ui, updateUi } = useApp()
+  const { ui, updateUi, updateShell } = useApp()
+  const nameOf = useMemberNames()
   const [menu, setMenu] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const hidden = ui.hiddenChannels.includes(channel.id)
+  const partner = directPartner(channel)
 
   useEffect(() => {
     if (!menu) return
@@ -280,20 +545,83 @@ function ChannelRow({
     setMenu(false)
   }
 
+  const preview = summary?.lastText
+    ? (channel.type !== 'direct' && summary.lastSenderId ? `${nameOf(summary.lastSenderId) ?? '…'}: ` : '') + summary.lastText
+    : ''
+  const has = unread > 0
+
   return (
-    <div className={`row-item ${active ? 'active' : ''} ${unread ? 'unread' : ''}`} ref={ref}>
-      <button className="row-main" onClick={onOpen}>
-        <span className={`ch-icon ch-${channel.type}`} aria-hidden="true">
-          {channel.type === 'direct' ? '@' : '#'}
+    <div
+      className={`row-item ch-row ${active ? 'active' : ''} ${has ? 'unread' : ''} ${dropMark ? `drop-${dropMark}` : ''}`}
+      ref={ref}
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <button className="row-main" onClick={onOpen} aria-label={has ? `${title}, 안 읽은 메시지 ${unread}개` : title}>
+        {partner ? (
+          <Avatar memberId={partner} size={28} />
+        ) : (
+          <span className={`ch-icon ch-${channel.type}`} aria-hidden="true">
+            #
+          </span>
+        )}
+        <span className="ch-text">
+          <span className="ch-line">
+            <span className="grow ellipsis ch-title">{title}</span>
+            {summary?.lastAt && <span className="ch-time">{formatTime(summary.lastAt)}</span>}
+          </span>
+          {preview && (
+            <span className="ch-line">
+              <span className="grow ellipsis ch-preview">{preview}</span>
+              {muted && (
+                <span className="ch-muted" title="알림 꺼짐">
+                  <Icon name="bellOff" size={12} />
+                </span>
+              )}
+              {has && <span className="badge">{unread > 99 ? '99+' : unread}</span>}
+              {!has && mutedUnread > 0 && <span className="badge quiet">{mutedUnread}</span>}
+            </span>
+          )}
         </span>
-        <span className="grow ellipsis">{title}</span>
-        {unread && <span className="unread-dot" aria-label="새 메시지" />}
+        {!preview && has && <span className="badge">{unread > 99 ? '99+' : unread}</span>}
       </button>
       <button className="row-more" aria-label="대화방 메뉴" onClick={() => setMenu((m) => !m)}>
         <Icon name="more" size={16} />
       </button>
       {menu && (
         <div className="popover" role="menu">
+          <button
+            role="menuitem"
+            onClick={() => {
+              updateShell((s) => ({
+                ...s,
+                layout: {
+                  ...s.layout,
+                  favorites: favorite ? s.layout.favorites.filter((x) => x !== channel.id) : [...s.layout.favorites, channel.id]
+                }
+              }))
+              setMenu(false)
+            }}
+          >
+            <Icon name="star" size={14} /> {favorite ? '즐겨찾기 해제' : '즐겨찾기에 고정'}
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              updateShell((s) => {
+                const set = new Set(s.prefs.notify.muted)
+                if (set.has(channel.id)) set.delete(channel.id)
+                else set.add(channel.id)
+                return { ...s, prefs: { ...s.prefs, notify: { ...s.prefs.notify, muted: [...set] } } }
+              })
+              setMenu(false)
+            }}
+          >
+            <Icon name={muted ? 'bell' : 'bellOff'} size={14} /> {muted ? '알림 켜기' : '이 방 알림 끄기'}
+          </button>
+          <hr />
           <div className="popover-title">프로젝트에 넣기</div>
           {ui.projects.length === 0 && <div className="muted small pad">먼저 프로젝트를 만드세요 (⌗ 버튼)</div>}
           {ui.projects.map((p) => (
@@ -332,23 +660,49 @@ function ChannelPane({
   me,
   active,
   onOpenThread,
-  openThreadId
+  openThread,
+  readMarkerAt,
+  focusMessageId
 }: {
   channel: Channel
   title: string
   me: Member | null
   active: boolean
   onOpenThread: (t: OpenThread) => void
-  openThreadId: string | null
+  openThread: OpenThread | null
+  readMarkerAt: string | null
+  focusMessageId: string | null
 }) {
-  const { ui, toast } = useApp()
+  const { ui, toast, shell, updateShell } = useApp()
+  const openThreadId = openThread?.threadChannelId ?? null
   const nameOf = useMemberNames()
   const [tab, setTab] = useState<'chat' | 'threads'>('chat')
   const [mode, setMode] = useState<ComposeMode>({ kind: 'normal' })
   const [newTopic, setNewTopic] = useState(false)
   const [gallery, setGallery] = useState(false)
-  const { messages, error, reload, loadMore, canLoadMore } = useChannelLogs(channel.id, active, 100)
+  const { messages, error, reload, loadMore, canLoadMore, ensure } = useChannelLogs(channel.id, active, 100)
   const threads = useMemo(() => collectThreads(messages), [messages])
+  const muted = !!shell?.prefs.notify.muted.includes(channel.id)
+
+  // 검색·알림에서 온 메시지가 보관함 깊은 곳에 있어도 보이게 불러온다
+  useEffect(() => {
+    ensure(focusMessageId)
+    if (focusMessageId) setTab('chat')
+  }, [focusMessageId, ensure])
+
+  // 이동 버스로 연 스레드는 첫 메시지(root)를 모르므로, 대화방 메시지에서 찾아 채운다
+  useEffect(() => {
+    if (!openThread || openThread.root || openThread.parentChannelId !== channel.id) return
+    const root = messages.find((m) => m.thread?.channelId === openThread.threadChannelId)
+    if (root) onOpenThread({ ...openThread, root })
+  }, [messages, openThread, channel.id, onOpenThread])
+
+  // "여기까지 읽음" 은 내가 보낸 것만 있거나 새 메시지가 없으면 그리지 않는다
+  const marker = useMemo(() => {
+    if (!readMarkerAt) return null
+    const t = Date.parse(readMarkerAt)
+    return messages.some((m) => m.senderId !== me?.id && m.sentAt && Date.parse(m.sentAt) > t) ? readMarkerAt : null
+  }, [readMarkerAt, messages, me?.id])
   const project = ui.projects.find((p) => p.id === ui.channelProject[channel.id]) ?? null
 
   const open = (m: Message) => {
@@ -358,7 +712,8 @@ function ChannelPane({
   async function send(text: string) {
     try {
       if (mode.kind === 'reply') {
-        await call('messenger:reply', channel.id, mode.m.id, text)
+        const r = await call('messenger:reply', channel.id, mode.m.id, text)
+        if (r.id) rememberReply(channel.id, r.id, mode.m)
       } else if (mode.kind === 'threadFrom') {
         const r = await call('messenger:threadFromMessage', channel.id, mode.m.id, text)
         onOpenThread({ threadChannelId: r.channelId, parentChannelId: channel.id, root: mode.m })
@@ -412,6 +767,30 @@ function ChannelPane({
         <button className="primary small" onClick={() => setNewTopic(true)} title="프로젝트·제목을 붙여 스레드로 새 주제를 연다">
           <Icon name="plus" size={14} /> 새 주제
         </button>
+        <button
+          className="icon-btn"
+          onClick={() => openSearch({ scope: { channelId: channel.id, title } })}
+          title="이 대화방에서 찾기 (⌘F)"
+          aria-label="이 대화방에서 찾기"
+        >
+          <Icon name="search" size={16} />
+        </button>
+        <button
+          className="icon-btn"
+          onClick={() =>
+            updateShell((s) => {
+              const set = new Set(s.prefs.notify.muted)
+              if (set.has(channel.id)) set.delete(channel.id)
+              else set.add(channel.id)
+              return { ...s, prefs: { ...s.prefs, notify: { ...s.prefs.notify, muted: [...set] } } }
+            })
+          }
+          title={muted ? '이 방 알림 켜기' : '이 방 알림 끄기'}
+          aria-label={muted ? '이 방 알림 켜기' : '이 방 알림 끄기'}
+          aria-pressed={muted}
+        >
+          <Icon name={muted ? 'bellOff' : 'bell'} size={16} />
+        </button>
         <button className="icon-btn" onClick={() => setGallery(true)} title="파일 모아보기" aria-label="파일 모아보기">
           <Icon name="clip" size={16} />
         </button>
@@ -428,13 +807,16 @@ function ChannelPane({
             meId={me?.id ?? null}
             onReply={(m) => setMode({ kind: 'reply', m })}
             onOpenThread={open}
-            onStartThread={(m) => setMode({ kind: 'threadFrom', m })}
+            onStartThread={(m) => onOpenThread({ threadChannelId: '', parentChannelId: channel.id, root: m, startFrom: true })}
             onChanged={() => void reload()}
             canLoadMore={canLoadMore}
             onLoadMore={loadMore}
+            highlightId={focusMessageId}
+            readMarkerAt={marker}
           />
           <Composer
             placeholder={`${title}에 메시지 보내기`}
+            channelId={channel.id}
             autoFocusKey={channel.id + mode.kind}
             banner={banner}
             onCancelBanner={mode.kind === 'normal' ? undefined : () => setMode({ kind: 'normal' })}
@@ -559,12 +941,14 @@ function ProjectPane({
   channels,
   onOpenThread,
   onOpenChannel,
+  onNewTopic,
   nameOf
 }: {
   project: ProjectGroup | null
   channels: Channel[]
   onOpenThread: (t: OpenThread) => void
   onOpenChannel: (c: Channel) => void
+  onNewTopic: () => void
   nameOf: (id: string | null) => string | null
 }) {
   const { ui, toast } = useApp()
@@ -620,6 +1004,9 @@ function ProjectPane({
           <b>{project.name}</b>
           <span className="muted small"> · 대화방 {inProject.length}개</span>
         </div>
+        <button className="primary small" onClick={onNewTopic} disabled={inProject.length === 0} title="이 프로젝트 대화방에 새 주제 스레드를 연다">
+          <Icon name="plus" size={14} /> 새 주제
+        </button>
         <button className="small" disabled={loading} onClick={() => void scan('all')} title="모든 대화방에서 이 프로젝트 태그가 붙은 스레드를 찾는다">
           모든 대화방에서 찾기
         </button>
@@ -661,11 +1048,13 @@ function ProjectPane({
 function NewTopicDialog({
   defaultProject,
   onClose,
-  onSubmit
+  onSubmit,
+  extra
 }: {
   defaultProject: string | null
   onClose: () => void
   onSubmit: (topic: string, body: string) => Promise<void>
+  extra?: ReactNode
 }) {
   const { ui, toast } = useApp()
   const [project, setProject] = useState(defaultProject ?? '')
@@ -691,6 +1080,7 @@ function NewTopicDialog({
           }
         }}
       >
+        {extra}
         <label>
           <span>프로젝트</span>
           <input list="project-names" value={project} onChange={(e) => setProject(e.target.value)} placeholder="없으면 비워 두세요" />
@@ -866,5 +1256,117 @@ function NewChannelDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         </div>
       </form>
     </Modal>
+  )
+}
+
+/** 사람 → 1:1 대화. 아직 1:1 방이 없으면 첫 메시지를 보내 방을 만든다 (두레이 direct-send) */
+function DirectComposeDialog({ memberId, onClose, onSent }: { memberId: string; onClose: () => void; onSent: () => Promise<void> }) {
+  const { toast } = useApp()
+  const nameOf = useMemberNames()
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const name = nameOf(memberId) ?? '…'
+
+  async function send() {
+    if (!text.trim()) return
+    setBusy(true)
+    try {
+      await call('messenger:directSend', memberId, text.trim())
+      await onSent()
+    } catch (e) {
+      toast(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title={`${name}님과 1:1 대화`} onClose={onClose}>
+      <div className="direct-head">
+        <Avatar memberId={memberId} size={40} />
+        <div>
+          <b>{name}</b>
+          <div className="muted small">아직 1:1 대화방이 없습니다. 첫 메시지를 보내면 대화방이 생깁니다.</div>
+        </div>
+      </div>
+      <form
+        className="form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void send()
+        }}
+      >
+        <textarea
+          rows={4}
+          autoFocus
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={`${name}님에게 보낼 메시지`}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault()
+              void send()
+            }
+          }}
+        />
+        <div className="row end">
+          <button type="button" onClick={onClose}>
+            취소
+          </button>
+          <button className="primary" disabled={busy || !text.trim()}>
+            {busy ? '보내는 중…' : '보내기'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/** 프로젝트 폴더에서 바로 "새 주제": 어느 대화방에 열지 고르고 [프로젝트] 제목으로 스레드를 만든다 */
+function ProjectTopicDialog({
+  project,
+  channels,
+  titleOf,
+  onClose,
+  onCreated
+}: {
+  project: ProjectGroup | null
+  channels: Channel[]
+  titleOf: (c: Channel) => string
+  onClose: () => void
+  onCreated: (c: Channel, threadChannelId: string, topic: string) => void
+}) {
+  const sorted = useMemo(() => [...channels].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')), [channels])
+  const [channelId, setChannelId] = useState(sorted[0]?.id ?? '')
+  if (!project) return null
+  if (sorted.length === 0) {
+    return (
+      <Modal title={`[${project.name}] 새 주제`} onClose={onClose}>
+        <p className="muted">이 프로젝트에 넣은 대화방이 없습니다. 대화방을 프로젝트 폴더로 끌어 놓거나 ⋯ 메뉴로 넣으세요.</p>
+      </Modal>
+    )
+  }
+  return (
+    <NewTopicDialog
+      defaultProject={project.name}
+      onClose={onClose}
+      extra={
+        <label>
+          <span>대화방</span>
+          <select value={channelId} onChange={(e) => setChannelId(e.target.value)}>
+            {sorted.map((c) => (
+              <option key={c.id} value={c.id}>
+                {titleOf(c)}
+              </option>
+            ))}
+          </select>
+        </label>
+      }
+      onSubmit={async (topic, body) => {
+        const c = sorted.find((x) => x.id === channelId) ?? sorted[0]
+        const r = await call('messenger:createThread', c.id, topic, body || null)
+        onCreated(c, r.channelId, topic)
+      }}
+    />
   )
 }

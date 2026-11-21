@@ -19,42 +19,71 @@ export function useInterval(fn: () => void, ms: number, active: boolean): void {
 /**
  * 대화방(또는 스레드 채널) 메시지. 두레이에는 메시지 조회용 공식 API 가 없어
  * 비공식 GET .../logs?size=N (최신 N개, 최대 1000) 을 쓴다. 실시간 이벤트가 없으면 주기적으로 다시 읽는다.
+ *
+ * 받아 온 메시지는 main 의 로컬 보관함에 쌓이고, 화면은 보관함 기준으로 보여준다 (shell:logs).
+ * 그래서 "이전 메시지 더 보기"는 서버의 1000개를 넘어 예전에 받아 둔 기록까지 이어진다.
+ * 서버에 연결되지 않아도 보관함에 있는 것은 보인다.
  */
 export function useChannelLogs(channelId: string | null, active: boolean, initialSize = 100) {
   const { settings, realtime } = useApp()
   const [messages, setMessages] = useState<Message[]>([])
-  const [size, setSize] = useState(initialSize)
+  const [limit, setLimit] = useState(initialSize)
+  const [hasOlder, setHasOlder] = useState(false)
+  const [serverFull, setServerFull] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [includeId, setIncludeId] = useState<string | null>(null)
   const inflight = useRef(false)
+  const backfilled = useRef(false)
+  const wantBackfill = useRef(false)
+  const rerun = useRef(false)
   const current = useRef(channelId)
   current.current = channelId
 
   const load = useCallback(
     async (quiet = false) => {
-      if (!channelId || inflight.current) return
+      if (!channelId) return
+      if (inflight.current) {
+        rerun.current = true
+        return
+      }
       inflight.current = true
+      const serverSize = wantBackfill.current ? 1000 : initialSize
+      wantBackfill.current = false
       if (!quiet) setLoading(true)
       try {
-        const list = await call('messenger:logs', channelId, size)
+        const r = await call('shell:logs', channelId, serverSize, limit, includeId)
         if (current.current === channelId) {
-          setMessages((prev) => (sameList(prev, list) ? prev : list))
-          setError(null)
+          setMessages((prev) => (sameList(prev, r.messages) ? prev : r.messages))
+          setHasOlder(r.hasOlder)
+          if (r.serverCount >= serverSize) setServerFull(true)
+          setError(r.error)
         }
       } catch (e) {
         if (current.current === channelId) setError(errorText(e))
       } finally {
         inflight.current = false
         if (!quiet) setLoading(false)
+        if (rerun.current) {
+          rerun.current = false
+          void loadRef.current(true)
+        }
       }
     },
-    [channelId, size]
+    [channelId, limit, includeId, initialSize]
   )
+  const loadRef = useRef(load)
+  loadRef.current = load
 
   useEffect(() => {
     setMessages([])
     setError(null)
-    setSize(initialSize)
+    setLimit(initialSize)
+    setHasOlder(false)
+    setServerFull(false)
+    setIncludeId(null)
+    backfilled.current = false
+    wantBackfill.current = false
   }, [channelId, initialSize])
 
   useEffect(() => {
@@ -72,9 +101,27 @@ export function useChannelLogs(channelId: string | null, active: boolean, initia
     })
   }, [channelId, load])
 
-  const loadMore = useCallback(() => setSize((s) => Math.min(1000, s + 200)), [])
+  const loadMore = useCallback(() => {
+    // 보관함에 더 오래된 것이 없으면 서버의 최대치(1000)를 한 번 받아 채운다 (limit 이 바뀌면 다시 읽는다)
+    if (!backfilled.current && !hasOlder && serverFull) {
+      backfilled.current = true
+      wantBackfill.current = true
+    }
+    setLimit((s) => s + 200)
+  }, [hasOlder, serverFull])
 
-  return { messages, loading, error, reload: () => load(true), loadMore, canLoadMore: size < 1000 && messages.length >= size }
+  /** 이 메시지가 보이도록 불러온다 (검색 결과·알림에서 이동할 때) */
+  const ensure = useCallback((id: string | null) => setIncludeId(id), [])
+
+  return {
+    messages,
+    loading,
+    error,
+    reload: () => load(true),
+    loadMore,
+    ensure,
+    canLoadMore: hasOlder || (serverFull && !backfilled.current)
+  }
 }
 
 function sameList(a: Message[], b: Message[]): boolean {
