@@ -27,6 +27,7 @@ import { FileDropArea } from '../components/files/FileDropArea'
 import { FileGallery } from '../components/files/FileGallery'
 import { Composer } from '../components/Composer'
 import { ThreadPanel, type OpenThread } from '../components/ThreadPanel'
+import { rememberReply } from '../components/chat/chatStore'
 import { Modal } from '../components/Modal'
 import { Icon } from '../components/Icon'
 import { Avatar } from '../components/people/Avatar'
@@ -711,7 +712,8 @@ function ChannelPane({
   async function send(text: string) {
     try {
       if (mode.kind === 'reply') {
-        await call('messenger:reply', channel.id, mode.m.id, text)
+        const r = await call('messenger:reply', channel.id, mode.m.id, text)
+        if (r.id) rememberReply(channel.id, r.id, mode.m)
       } else if (mode.kind === 'threadFrom') {
         const r = await call('messenger:threadFromMessage', channel.id, mode.m.id, text)
         onOpenThread({ threadChannelId: r.channelId, parentChannelId: channel.id, root: mode.m })
@@ -805,7 +807,7 @@ function ChannelPane({
             meId={me?.id ?? null}
             onReply={(m) => setMode({ kind: 'reply', m })}
             onOpenThread={open}
-            onStartThread={(m) => setMode({ kind: 'threadFrom', m })}
+            onStartThread={(m) => onOpenThread({ threadChannelId: '', parentChannelId: channel.id, root: m, startFrom: true })}
             onChanged={() => void reload()}
             canLoadMore={canLoadMore}
             onLoadMore={loadMore}
@@ -814,6 +816,7 @@ function ChannelPane({
           />
           <Composer
             placeholder={`${title}에 메시지 보내기`}
+            channelId={channel.id}
             autoFocusKey={channel.id + mode.kind}
             banner={banner}
             onCancelBanner={mode.kind === 'normal' ? undefined : () => setMode({ kind: 'normal' })}

@@ -23,7 +23,15 @@ interface Item {
 }
 
 /** ⌘K 빠른 이동: 대화방·사람·위키 페이지를 한 곳에서. 키보드만으로 (↑↓ Enter Esc). */
-export function QuickSwitcher({ onClose, onSearchAll }: { onClose: () => void; onSearchAll: (q: string) => void }) {
+export function QuickSwitcher({
+  onClose,
+  onSearchAll,
+  onBookmarks
+}: {
+  onClose: () => void
+  onSearchAll: (q: string) => void
+  onBookmarks: () => void
+}) {
   const { shell, updateShell, unread } = useApp()
   const nameOf = useMemberNames()
   const [q, setQ] = useState('')
@@ -126,10 +134,12 @@ export function QuickSwitcher({ onClose, onSearchAll }: { onClose: () => void; o
       list = out.sort((a, b) => b.score - a.score).slice(0, 14)
     } else {
       list = out.sort((a, b) => b.score - a.score).slice(0, 40)
+      const bm = matchScore('북마크 모아보기', query)
+      if (bm) list.unshift({ key: 'bookmarks', icon: 'star', label: '북마크 모아보기', sub: '저장해 둔 메시지', target: null, run: onBookmarks, score: bm })
       list.push({ key: 'search-all', icon: 'search', label: `전체 검색: “${query}”`, sub: '메시지·위키 본문까지 (⌘⇧F)', target: null, run: () => onSearchAll(query), score: 0 })
     }
     return list
-  }, [data, found, q, recent, unread, nameOf, onSearchAll])
+  }, [data, found, q, recent, unread, nameOf, onSearchAll, onBookmarks])
 
   useEffect(() => setIndex(0), [q])
   useEffect(() => {

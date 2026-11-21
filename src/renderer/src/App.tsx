@@ -11,7 +11,8 @@ import { QuickSwitcher } from './shell/QuickSwitcher'
 import { SearchPanel } from './shell/SearchPanel'
 import { navHistory } from './shell/history'
 import { onOpenSearch } from './shell/overlay'
-import rakmMark from './assets/rakm-r.png'
+import { BookmarksPanel } from './components/chat/BookmarksPanel'
+import rakmTile from './assets/rakm-app-tile.png'
 
 type Tab = 'messenger' | 'mail' | 'wiki' | 'settings'
 
@@ -21,7 +22,7 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'wiki', label: '위키', icon: 'book' }
 ]
 
-type Overlay = { kind: 'quick' } | { kind: 'search'; q: string; scope: { channelId: string; title: string } | null } | null
+type Overlay = { kind: 'quick' } | { kind: 'bookmarks' } | { kind: 'search'; q: string; scope: { channelId: string; title: string } | null } | null
 
 export function App() {
   const { settings, realtime, shell, updateShell, unread, connection } = useApp()
@@ -66,6 +67,8 @@ export function App() {
     () =>
       onNav((req) => {
         if (redispatching.current) return
+        // 북마크 창에서 고르면 닫는다
+        setOverlay((o) => (o?.kind === 'bookmarks' ? null : o))
         const want: Tab = req.kind === 'wikiPage' ? 'wiki' : req.kind === 'settings' ? 'settings' : 'messenger'
         if (req.kind === 'channel' || req.kind === 'thread' || req.kind === 'wikiPage') navHistory.push(req)
         const mounted = openedRef.current.has(want)
@@ -136,13 +139,14 @@ export function App() {
   const shellRef = useRef(shell)
   shellRef.current = shell
   const closeOverlay = useCallback(() => setOverlay(null), [])
+  const openBookmarks = useCallback(() => setOverlay({ kind: 'bookmarks' }), [])
   const searchAll = useCallback((q: string) => setOverlay({ kind: 'search', q, scope: null }), [])
 
   return (
     <div className="app">
       <nav className="rail" aria-label="기능 전환">
         <div className="rail-logo" title="RAKM LABS">
-          <img src={rakmMark} alt="RAKM" draggable={false} />
+          <img src={rakmTile} alt="RAKM" draggable={false} />
         </div>
         {TABS.map((t, i) => (
           <button
@@ -214,7 +218,18 @@ export function App() {
           )}
         </div>
       </main>
-      {overlay?.kind === 'quick' && <QuickSwitcher onClose={closeOverlay} onSearchAll={searchAll} />}
+      {overlay?.kind === 'quick' && <QuickSwitcher onClose={closeOverlay} onSearchAll={searchAll} onBookmarks={openBookmarks} />}
+      {overlay?.kind === 'bookmarks' && (
+        <div
+          className="qs-backdrop"
+          onMouseDown={(e) => e.target === e.currentTarget && closeOverlay()}
+          onKeyDown={(e) => e.key === 'Escape' && closeOverlay()}
+        >
+          <div className="qs bookmarks-overlay" role="dialog" aria-modal="true" aria-label="북마크">
+            <BookmarksPanel onClose={closeOverlay} />
+          </div>
+        </div>
+      )}
       {overlay?.kind === 'search' && <SearchPanel initial={overlay.q} scope={overlay.scope} onClose={closeOverlay} />}
     </div>
   )
