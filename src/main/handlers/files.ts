@@ -2,7 +2,8 @@
 import { app, nativeImage, protocol, shell } from 'electron'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { FilesAreaContract } from '@shared/ipc-files'
 import {
   CACHE_LIMIT_CHOICES_MB,
@@ -42,6 +43,19 @@ function getCache(ctx: MainContext): FileCache {
 }
 
 let quickLook: ChildProcess | null = null
+
+/** 앱에 포함된 pdfjs-dist 폴더 (pdf.js 의 CMap·표준 글꼴). 앱 경로에서 위로 올라가며 찾는다. */
+let pdfjsDirCache: string | null = null
+function pdfjsDir(): string {
+  if (pdfjsDirCache) return pdfjsDirCache
+  let d = app.getAppPath()
+  for (let i = 0; i < 6; i++) {
+    const c = join(d, 'node_modules', 'pdfjs-dist')
+    if (existsSync(join(c, 'cmaps'))) return (pdfjsDirCache = c)
+    d = dirname(d)
+  }
+  return join(app.getAppPath(), 'node_modules', 'pdfjs-dist')
+}
 
 export function filesAreaHandlers(ctx: MainContext): HandlersFor<FilesAreaContract> {
   return {
@@ -114,7 +128,7 @@ export function filesAreaBeforeReady(): void {
 export function filesAreaSetup(ctx: MainContext): void {
   protocol.handle(
     FILE_SCHEME,
-    makeFileProtocolHandler(getCache(ctx), () => join(app.getAppPath(), 'node_modules', 'pdfjs-dist'))
+    makeFileProtocolHandler(getCache(ctx), pdfjsDir)
   )
   app.on('will-quit', () => {
     cache?.flush()
