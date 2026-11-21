@@ -1,5 +1,5 @@
 // 블록 편집기 스키마 (React 없이). 편집기와 왕복 테스트가 같은 스키마를 쓴다.
-import { Extension, Node, mergeAttributes, type AnyExtension } from '@tiptap/core'
+import { Extension, Node, mergeAttributes, type AnyExtension, type NodeViewRenderer } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import { TaskItem, TaskList } from '@tiptap/extension-list'
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
@@ -63,7 +63,13 @@ export const MdRaw = Node.create({
   }
 })
 
-export function schemaExtensions(): AnyExtension[] {
+/** 화면용 노드 뷰 (스키마는 바꾸지 않는다) */
+export interface NodeViews {
+  image?: NodeViewRenderer
+  mdRaw?: NodeViewRenderer
+}
+
+export function schemaExtensions(views: NodeViews = {}): AnyExtension[] {
   return [
     StarterKit.configure({
       underline: false,
@@ -77,8 +83,8 @@ export function schemaExtensions(): AnyExtension[] {
     TableRow,
     TableHeader,
     TableCell,
-    Image.configure({ inline: true, allowBase64: false }),
-    MdRaw,
+    (views.image ? Image.extend({ addNodeView: () => views.image! }) : Image).configure({ inline: true, allowBase64: false }),
+    views.mdRaw ? MdRaw.extend({ addNodeView: () => views.mdRaw! }) : MdRaw,
     BlockId
   ]
 }
