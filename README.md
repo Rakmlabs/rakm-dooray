@@ -17,7 +17,8 @@ npm install
 npx install-electron --no   # npm 11 이 설치 스크립트를 막아 Electron 바이너리가 없을 때만. 첫 실행 때 자동으로 받기도 한다.
 npm run dev                 # 개발 모드
 npm run build && npm start  # 빌드 결과로 실행
-npm run dist                # 설치 파일 만들기 (mac: dmg, win: nsis, linux: AppImage — 각 OS 에서 실행)
+npm run dist                # 서명·공증 없이 arm64 dmg/zip 만 만들기 (확인용)
+npm run release             # 배포용: 검사 → 빌드 → 서명 → 공증 → staple → 검증 (아래 '배포')
 npm test                    # 단위 테스트
 npm run typecheck
 ```
@@ -67,6 +68,41 @@ DOORAY_MOCK_BASE=http://127.0.0.1:8787 npm run dev   # 메신저·위키가 가�
 - 파일: 이미지·동영상·오디오·PDF·docx·xlsx·코드 등을 앱 안에서 보기, 끌어 놓기·붙여넣기 업로드, 방별 파일 모아보기, 캐시 상한(설정).
 - 위키: 블록 편집(클릭해 바로 고치기, `/` 메뉴, 손잡이로 옮기기), 자동 저장, 저장 전 서버 버전 확인, 첫 저장 전 원문 백업과 되돌리기, 원문 보기.
 - 설정: 테마(시스템/라이트/다크), 글자 크기, 메뉴 막대 상주, 로그인 시 자동 실행(설치한 앱만).
+
+## 배포 (macOS, Apple Silicon)
+
+자동 업데이트와 CI 는 없다. 이 Mac 에서 `npm run release` 한 줄로 만들고, GitHub 릴리스에 올린다.
+설정 화면에 현재 버전과 릴리스 페이지 링크가 있어, 새 버전은 거기서 내려받아 덮어쓴다.
+
+`npm run release` (`scripts/release.mjs`) 가 하는 일:
+1. 타입 검사, 단위 테스트, `electron-vite build`
+2. `electron-builder --mac --arm64`: Developer ID 로 서명(hardened runtime, `build/entitlements.mac.plist`), `.app` 공증·staple, dmg·zip 생성
+3. dmg 도 공증하고 staple
+4. `codesign --verify --deep --strict`, `spctl -a -vv`, `stapler validate` 결과와 파일 크기 출력
+
+산출물은 `release/RAKM-Dooray-<버전>-arm64.dmg`, `.zip` (git 에는 안 올라간다).
+
+앱 번들 이름은 `RAKM Dooray.app` (영문)이고 화면에 보이는 이름만 `RAKM 두레이` 다 (`CFBundleDisplayName`, `app.setName`).
+`productName` 이나 `CFBundleName` 에 한글을 넣으면 Electron 이 helper 앱을 찾지 못해 실행하자마자 죽는다(SIGTRAP) — 바꾸지 말 것.
+
+**자격**은 저장소 밖 `~/.config/sinawi/release.env` (권한 600) 에서 실행할 때만 읽는다. 이미 설정된 환경 변수가 먼저다.
+항목 이름: `APPLE_API_KEY`(App Store Connect API 키 ID), `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH`(`.p8` 경로), `APPLE_SIGNING_IDENTITY`(서명 인증서 이름).
+값은 저장소·로그에 넣지 않는다. 파일이 없으면 공증을 건너뛰고 그렇다고 알린다 — 그 빌드는 처음 열 때
+"시스템 설정 > 개인정보 보호 및 보안 > 그래도 열기" 가 필요하다.
+
+**버전 올려 배포하는 순서**
+
+```sh
+npm version 0.2.0 --no-git-tag-version          # package.json 버전 (설정 화면 표시도 이 값)
+git commit -am "chore: v0.2.0"
+npm run release                                 # 마지막 줄에 '공증: 완료' 와 spctl 'Notarized Developer ID' 확인
+git tag v0.2.0 && git push origin main v0.2.0
+gh release create v0.2.0 release/RAKM-Dooray-0.2.0-arm64.dmg release/RAKM-Dooray-0.2.0-arm64.zip \
+  --repo Rakmlabs/rakm-dooray --title "RAKM 두레이 0.2.0" --notes "바뀐 점 …"
+```
+
+받는 사람: dmg 를 열어 앱을 "응용 프로그램" 으로 끌어 놓고 실행 → 설정에서 자기 두레이 개인 API 토큰 입력.
+데이터 폴더는 개발·배포 빌드 모두 `~/Library/Application Support/dooray-client` 라 새 버전을 덮어써도 토큰과 받아 둔 메시지가 남는다.
 
 ## 구조
 
