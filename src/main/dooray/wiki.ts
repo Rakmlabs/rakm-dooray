@@ -128,6 +128,18 @@ export class WikiApi {
     return null
   }
 
+  /** 제목만 고친다 */
+  async updateTitle(wikiId: string, pageId: string, subject: string): Promise<void> {
+    await this.http.json('PUT', `/wiki/v1/wikis/${enc(wikiId)}/pages/${enc(pageId)}/title`, { body: { subject } })
+  }
+
+  /** 본문만 고친다 */
+  async updateContent(wikiId: string, pageId: string, content: string): Promise<void> {
+    await this.http.json('PUT', `/wiki/v1/wikis/${enc(wikiId)}/pages/${enc(pageId)}/content`, {
+      body: { body: { mimeType: MARKDOWN, content } }
+    })
+  }
+
   async move(wikiId: string, pageId: string, targetParentPageId: string): Promise<null> {
     await this.http.json('POST', `/wiki/v1/wikis/${enc(wikiId)}/pages/${enc(pageId)}/move`, {
       body: { targetParentPageId }
@@ -173,14 +185,37 @@ export class WikiApi {
     return null
   }
 
-  /** multipart 에서 type 필드를 file 보다 먼저 보내야 한다 (실측 메모). */
-  async uploadFile(wikiId: string, pageId: string, fileName: string, mimeType: string, bytes: Buffer): Promise<void> {
-    await this.http.upload(`/wiki/v1/wikis/${enc(wikiId)}/pages/${enc(pageId)}/files`, () => {
-      const form = new FormData()
-      form.append('type', 'general')
-      form.append('file', new Blob([new Uint8Array(bytes)], { type: mimeType }), fileName)
-      return form
-    })
+  /**
+   * multipart 에서 type 필드를 file 보다 먼저 보내야 한다 (공식 문서).
+   * type: general(첨부) | inline_image(본문 이미지). 응답 result 에 id, attachFileId, name 이 온다 (공식 문서 예시).
+   */
+  async uploadFile(
+    wikiId: string,
+    pageId: string,
+    fileName: string,
+    mimeType: string,
+    bytes: Buffer,
+    type: 'general' | 'inline_image' = 'general'
+  ): Promise<{ id: string; attachFileId: string | null; name: string }> {
+    const r = await this.http.upload<{ id?: string | number; attachFileId?: string | number; name?: string } | null>(
+      `/wiki/v1/wikis/${enc(wikiId)}/pages/${enc(pageId)}/files`,
+      () => {
+        const form = new FormData()
+        form.append('type', type)
+        form.append('file', new Blob([new Uint8Array(bytes)], { type: mimeType }), fileName)
+        return form
+      }
+    )
+    return {
+      id: String(r?.id ?? ''),
+      attachFileId: r?.attachFileId !== undefined && r?.attachFileId !== null ? String(r.attachFileId) : null,
+      name: r?.name ?? fileName
+    }
+  }
+
+  /** 본문 이미지 경로 /wikis/{wikiId}/files/{attachFileId} 의 파일 (공식: GET /wiki/v1/wikis/{wikiId}/attachFiles/{attachFileId}) */
+  downloadAttachFile(wikiId: string, attachFileId: string): Promise<DownloadedFile> {
+    return this.http.download(`/wiki/v1/wikis/${enc(wikiId)}/attachFiles/${enc(attachFileId)}`)
   }
 
   downloadFile(wikiId: string, pageId: string, fileId: string): Promise<DownloadedFile> {
@@ -190,4 +225,30 @@ export class WikiApi {
 
 function enc(v: string): string {
   return encodeURIComponent(v)
+}
+
+/** 본문 이미지 경로가 가리키는 두레이 파일. 두레이 경로가 아니면 null (임의 주소로 토큰을 보내지 않는다). */
+export type WikiImageRef = { kind: 'attach'; wikiId: string; attachFileId: string } | { kind: 'pageFile'; fileId: string }
+
+const DOORAY_HOST = /(^|\.)(dooray\.com|dooray\.co\.kr|gov-dooray\.com|gov-dooray\.co\.kr)$/i
+
+export function parseWikiImageSrc(src: string): WikiImageRef | null {
+  let path = src.trim()
+  if (/^https?:\/\//i.test(path)) {
+    let u: URL
+    try {
+      u = new URL(path)
+    } catch {
+      return null
+    }
+    if (u.protocol !== 'https:' || !DOORAY_HOST.test(u.hostname)) return null
+    path = u.pathname
+  } else if (!path.startsWith('/')) return null
+  path = path.split(/[?#]/)[0]
+  let m = path.match(/^\/wikis\/([^/]+)\/files\/([^/]+)\/?$/)
+  if (m) return { kind: 'attach', wikiId: m[1], attachFileId: m[2] }
+  // 공식 형식은 아니지만 웹 화면에서 보이는 경로 (불확실)
+  m = path.match(/^\/(?:page-files|files)\/(\d+)\/?$/)
+  if (m) return { kind: 'pageFile', fileId: m[1] }
+  return null
 }
