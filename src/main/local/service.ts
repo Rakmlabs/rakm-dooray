@@ -170,10 +170,25 @@ export class ShellService {
     return this.channels
   }
 
-  /** 서버에서 받은 메시지 묶음을 보관함에 넣고, 안 읽음·알림을 갱신한다 */
-  ingest(channelId: string, list: Message[], requestedSize: number): void {
+  /**
+   * 서버에서 최신 size 개를 받아 쌓는다. 받은 것이 전부 처음 보는 것이고 요청한 만큼 꽉 찼으면
+   * 그 사이(지난번에 받은 것과 이번 것 사이)를 놓쳤을 수 있어 최대치(1000)로 한 번 더 받는다.
+   */
+  async fetchInto(channelId: string, size: number): Promise<Message[]> {
+    const list = await this.deps.messenger.logs(channelId, size)
+    const added = this.ingest(channelId, list, size)
     const a = this.archive
-    if (!a) return
+    if (a && size < 1000 && list.length >= size && added === list.length && a.count(channelId) > added) {
+      await sleep(GAP_MS)
+      this.ingest(channelId, await this.deps.messenger.logs(channelId, 1000), 1000)
+    }
+    return list
+  }
+
+  /** 서버에서 받은 메시지 묶음을 보관함에 넣고, 안 읽음·알림을 갱신한다. 처음 본 메시지 수를 돌려준다. */
+  ingest(channelId: string, list: Message[], requestedSize: number): number {
+    const a = this.archive
+    if (!a) return 0
     const known = this.channels.some((c) => c.id === channelId)
     const readBefore = a.readMs(channelId)
     let added: Message[]
@@ -181,18 +196,19 @@ export class ShellService {
       added = a.ingest(channelId, list, requestedSize).added
     } catch (e) {
       console.error(`[shell] 보관 실패: ${e instanceof Error ? e.message : e}`)
-      return
+      return 0
     }
-    if (!known) return // 스레드 채널 등은 보관만 한다
+    if (!known) return added.length // 스레드 채널 등은 보관만 한다
     if (readBefore === null) {
       // 처음 보는 대화방: 지금까지 것은 읽은 것으로 시작한다 (설치 직후 안 읽음이 쏟아지지 않게)
       a.markRead(channelId)
     } else if (this.watching(channelId)) {
       a.markRead(channelId)
     } else if (added.length) {
-      this.notify(channelId, added, readBefore)
+      void this.notify(channelId, added, readBefore)
     }
     this.scheduleUnread()
+    return added.length
   }
 
   page(channelId: string, limit: number, includeId: string | null, fallback: Message[]) {
@@ -344,8 +360,7 @@ export class ShellService {
         this.rr += 3
       }
       for (const t of targets) {
-        const list = await this.deps.messenger.logs(t.id, t.size)
-        this.ingest(t.id, list, t.size)
+        await this.fetchInto(t.id, t.size)
         if (t.size === 1000) this.archive?.setBackfilled(t.id)
         await sleep(GAP_MS)
       }

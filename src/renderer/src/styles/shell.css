@@ -337,3 +337,17 @@
   box-shadow: none;
   padding: 2px 0;
 }
+.card .toggle-row > .toggle-text {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--fg);
+  gap: 1px;
+}
+.toggle-text small {
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.card .row > button {
+  flex: none;
+  white-space: nowrap;
+}

@@ -82,8 +82,10 @@ export function QuickSwitcher({ onClose, onSearchAll }: { onClose: () => void; o
         score: s + boost(key) + (n ? 3 : 0)
       })
     }
+    // 이미 1:1 방이 있는 사람은 그 방 항목 하나로 충분하다
+    const withDirect = new Set(data.channels.map(directPartner).filter((x): x is string => !!x))
     const people = new Map<string, Member>()
-    for (const m of [...data.members, ...found]) if (m.id !== data.meId) people.set(m.id, m)
+    for (const m of [...data.members, ...found]) if (m.id !== data.meId && !withDirect.has(m.id)) people.set(m.id, m)
     for (const m of people.values()) {
       const target: NavRequest = { kind: 'direct', memberId: m.id }
       const key = targetKey(target)
@@ -95,7 +97,9 @@ export function QuickSwitcher({ onClose, onSearchAll }: { onClose: () => void; o
       for (const p of data.wikiPages) {
         const target: NavRequest = { kind: 'wikiPage', wikiId: p.wikiId, pageId: p.id }
         const key = targetKey(target)
-        const s = Math.max(matchScore(p.subject, query), matchScore(p.path, query) - 30)
+        // 경로(위키 이름 › 상위 페이지)로도 찾되 낮게. 초성 질의는 경로까지 보면 너무 많이 걸려 제목만 본다
+        const byPath = /[ㄱ-ㅎ]/.test(query) ? 0 : matchScore(p.path, query) - 30
+        const s = Math.max(matchScore(p.subject, query), byPath)
         if (s <= 0) continue
         out.push({ key, icon: 'page', label: p.subject, sub: p.path, target, score: s - 4 + boost(key) })
       }

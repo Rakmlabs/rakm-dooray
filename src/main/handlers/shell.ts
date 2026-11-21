@@ -27,7 +27,7 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-export function shellAreaHandlers(ctx: MainContext): HandlersFor<ShellAreaContract> {
+export function shellAreaHandlers(_ctx: MainContext): HandlersFor<ShellAreaContract> {
   return {
     'shell:getState': async () => need().getState(),
     'shell:saveState': async (s) => need().saveState(s),
@@ -37,9 +37,8 @@ export function shellAreaHandlers(ctx: MainContext): HandlersFor<ShellAreaContra
       let list: Message[] = []
       let error: string | null = null
       try {
-        list = await ctx.messenger.logs(channelId, size)
+        list = await s.fetchInto(channelId, size)
         s.noteResult(null)
-        s.ingest(channelId, list, size)
       } catch (e) {
         s.noteResult(e)
         // 보관함에 있는 것이 없으면 오류를 그대로 보여준다
