@@ -1,4 +1,5 @@
 import type { Channel, Message, ProjectGroup, ThreadInfo, UiState } from '@shared/types'
+import type { ChannelSummary, ShellLayout } from '@shared/types-shell'
 
 /**
  * "한 대화방에 여러 프로젝트 얘기가 섞인다" 문제를 위한 규칙.
@@ -72,33 +73,83 @@ function byRecent(a: Channel, b: Channel): number {
   return (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '')
 }
 
-/** 프로젝트 그룹 → 1:1 → 미분류 순. 숨긴 대화방은 마지막 '숨김' 섹션으로. */
-export function groupChannels(channels: Channel[], ui: UiState): ChannelSection[] {
+/** 사용자가 끌어서 정한 순서를 먼저, 나머지는 최근 순으로 */
+export function applyOrder(channels: Channel[], order: string[] | undefined): Channel[] {
+  const recent = [...channels].sort(byRecent)
+  if (!order?.length) return recent
+  const pos = new Map(order.map((id, i) => [id, i]))
+  const ordered = recent.filter((c) => pos.has(c.id)).sort((a, b) => pos.get(a.id)! - pos.get(b.id)!)
+  return [...ordered, ...recent.filter((c) => !pos.has(c.id))]
+}
+
+/**
+ * 즐겨찾기 → 프로젝트 폴더 → 1:1 → 미분류 순. 숨긴 대화방은 마지막 '숨김' 섹션으로.
+ * layout 이 있으면 즐겨찾기 섹션을 만들고(그 방은 다른 섹션에서 빠진다) 섹션마다 사용자가 정한 순서를 쓴다.
+ */
+export function groupChannels(channels: Channel[], ui: UiState, layout?: Pick<ShellLayout, 'favorites' | 'order'>): ChannelSection[] {
   const live = channels.filter((c) => c.status !== 'deleted')
   const hidden = new Set(ui.hiddenChannels)
+  const fav = new Set(layout?.favorites ?? [])
   const projectIds = new Set(ui.projects.map((p) => p.id))
-  const sections: ChannelSection[] = ui.projects.map((p) => ({
-    key: `p:${p.id}`,
-    title: p.name,
-    project: p,
-    channels: live.filter((c) => !hidden.has(c.id) && ui.channelProject[c.id] === p.id).sort(byRecent)
-  }))
-  const unassigned = live.filter((c) => !hidden.has(c.id) && !projectIds.has(ui.channelProject[c.id] ?? ''))
+  const order = layout?.order ?? {}
+  const visible = live.filter((c) => !hidden.has(c.id) && !fav.has(c.id))
+  const sections: ChannelSection[] = []
+  if (layout) {
+    const byId = new Map(live.map((c) => [c.id, c]))
+    const favList = layout.favorites.map((id) => byId.get(id)).filter((c): c is Channel => !!c && !hidden.has(c.id))
+    sections.push({ key: 'fav', title: '즐겨찾기', project: null, channels: favList })
+  }
+  for (const p of ui.projects) {
+    const key = `p:${p.id}`
+    sections.push({ key, title: p.name, project: p, channels: applyOrder(visible.filter((c) => ui.channelProject[c.id] === p.id), order[key]) })
+  }
+  const unassigned = visible.filter((c) => !projectIds.has(ui.channelProject[c.id] ?? ''))
   sections.push({
     key: 'direct',
     title: '1:1 대화',
     project: null,
-    channels: unassigned.filter((c) => c.type === 'direct' || c.type === 'me').sort(byRecent)
+    channels: applyOrder(unassigned.filter((c) => c.type === 'direct' || c.type === 'me'), order.direct)
   })
   sections.push({
     key: 'other',
     title: '미분류 대화방',
     project: null,
-    channels: unassigned.filter((c) => c.type !== 'direct' && c.type !== 'me').sort(byRecent)
+    channels: applyOrder(unassigned.filter((c) => c.type !== 'direct' && c.type !== 'me'), order.other)
   })
   const hiddenList = live.filter((c) => hidden.has(c.id)).sort(byRecent)
   if (hiddenList.length) sections.push({ key: 'hidden', title: '숨김', project: null, channels: hiddenList })
   return sections
+}
+
+/** 끌어 놓기: 섹션 안에서 dragged 를 target 앞(after 면 뒤)으로 옮긴 새 순서 */
+export function moveInOrder(ids: string[], dragged: string, target: string, after = false): string[] {
+  if (dragged === target) return ids
+  const rest = ids.filter((id) => id !== dragged)
+  const i = rest.indexOf(target)
+  if (i < 0) return [...rest, dragged]
+  rest.splice(after ? i + 1 : i, 0, dragged)
+  return rest
+}
+
+/** 1:1 방의 상대 (나 말고 첫 번째 참가자) */
+export function directPartner(c: Channel): string | null {
+  if (c.type !== 'direct') return null
+  return c.participantIds.find((id) => id !== c.meId) ?? null
+}
+
+/** 그 사람과의 기존 1:1 방 */
+export function findDirectChannel(channels: Channel[], memberId: string): Channel | null {
+  return (
+    channels.find(
+      (c) => c.type === 'direct' && c.status !== 'deleted' && c.participantIds.includes(memberId) && c.participantIds.length <= 2
+    ) ?? null
+  )
+}
+
+/** 로컬 보관함 기준 안 읽은 수 (보는 중인 방은 0) */
+export function unreadCount(summaries: Record<string, ChannelSummary>, channelId: string, viewing: string | null): number {
+  if (channelId === viewing) return 0
+  return summaries[channelId]?.unread ?? 0
 }
 
 export function isUnread(c: Channel, ui: UiState, activity: Set<string>): boolean {

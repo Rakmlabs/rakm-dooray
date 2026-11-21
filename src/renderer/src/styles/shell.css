@@ -1,1 +1,339 @@
 /* 앱 전역 편의: ⌘K, 폴더, 안 읽음·알림, 로컬 보관·검색, 창·트레이 영역 스타일. 이 영역 작업자만 고친다. 색은 styles.css 의 :root 토큰(var(--accent) 등)만 쓴다. */
+
+/* ---------- 레일: 안 읽음 배지, 연결 끊김 ---------- */
+.rail-btn {
+  position: relative;
+}
+.rail-badge {
+  position: absolute;
+  top: 3px;
+  right: 7px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--danger);
+  color: var(--accent-fg);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+.rail-offline {
+  color: var(--danger);
+  margin-bottom: 8px;
+  display: grid;
+  place-items: center;
+}
+.offline-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  background: var(--warn-bg);
+  color: var(--fg);
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---------- 배지 ---------- */
+.badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.badge.quiet {
+  background: var(--line);
+  color: var(--muted);
+}
+
+/* ---------- 대화방 목록 ---------- */
+.ch-row .row-main {
+  padding: 6px 8px;
+  align-items: center;
+}
+.ch-row .ch-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--hover);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+}
+.ch-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.ch-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ch-title {
+  font-weight: 500;
+  color: var(--fg);
+}
+.ch-time {
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.ch-preview {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.ch-muted {
+  color: var(--muted);
+  display: inline-flex;
+}
+.row-item.unread .ch-title {
+  font-weight: 700;
+}
+.row-item.unread .ch-preview {
+  color: var(--body);
+}
+.row-item.unread .ch-time {
+  color: var(--accent);
+  font-weight: 600;
+}
+.ch-row[draggable='true'] {
+  cursor: default;
+}
+.ch-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.ch-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.section.drop-into > .section-head {
+  background: var(--accent-weak);
+  border-radius: 6px;
+  outline: 1px dashed var(--accent);
+}
+.fav-star {
+  display: inline-flex;
+  color: var(--accent);
+}
+.section-open svg {
+  vertical-align: -1px;
+}
+
+/* ---------- ⌘K / 전체 검색 ---------- */
+.qs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(10, 14, 22, 0.38);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+.qs {
+  width: min(620px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.qs.search-panel {
+  width: min(760px, 94vw);
+  max-height: 78vh;
+}
+.qs-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.qs-input input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 16px;
+  color: var(--fg);
+}
+.qs-list {
+  overflow-y: auto;
+  padding: 6px;
+  min-height: 0;
+  flex: 1;
+}
+.qs-group {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 8px 10px 4px;
+}
+.qs-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.qs-item,
+.search-hit {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 7px 10px;
+  gap: 10px;
+  text-align: left;
+  justify-content: flex-start;
+}
+.qs-item.active {
+  background: var(--accent-weak);
+}
+.search-hit {
+  align-items: flex-start;
+}
+.search-hit:hover:not(:disabled),
+.qs-item:hover:not(:disabled) {
+  background: var(--hover);
+}
+.qs-item.active:hover:not(:disabled) {
+  background: var(--accent-weak);
+}
+.qs-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+.qs-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.qs-label {
+  color: var(--fg);
+  font-weight: 500;
+}
+.qs-sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.qs-enter {
+  flex: none;
+}
+.qs-foot {
+  display: flex;
+  gap: 16px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+}
+.qs-foot kbd {
+  margin-right: 2px;
+}
+.search-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.right {
+  text-align: right;
+}
+.hit-body {
+  font-size: 13px;
+  color: var(--body);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+}
+.qs mark,
+.search-results mark {
+  background: var(--accent-tint);
+  color: var(--fg);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* ---------- 1:1 첫 메시지, 최근 스레드 ---------- */
+.direct-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.recent-threads {
+  width: min(440px, 90%);
+  margin: 18px auto 0;
+  text-align: left;
+}
+
+/* ---------- 설정 ---------- */
+.pref-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.seg-pref button {
+  padding: 4px 14px;
+}
+.toggle-row {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.toggle-row input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+.toggle-text {
+  display: flex;
+  flex-direction: column;
+  color: var(--fg);
+}
+.pref-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+.stats {
+  margin: 8px 0 12px;
+  padding-left: 18px;
+  line-height: 1.8;
+}
+.qs-input input,
+.qs-input input:focus {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  padding: 2px 0;
+}

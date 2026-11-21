@@ -27,8 +27,9 @@
   color-scheme: light;
 }
 
+/* 다크 모드: 설정의 테마(시스템 따라가기/라이트/다크)를 html[data-theme] 로 받는다. 시스템 따라가기면 속성이 없다. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #12161c;
     --panel: #191f28;
     --panel-2: #1f2630;
@@ -50,6 +51,28 @@
     --mention: #8fb0ff;
     color-scheme: dark;
   }
+}
+:root[data-theme='dark'] {
+  --bg: #12161c;
+  --panel: #191f28;
+  --panel-2: #1f2630;
+  --rail: #0d1117;
+  --rail-fg: #7f8a97;
+  --fg: #e9edf2;
+  --body: #c3cad3;
+  --muted: #8b95a1;
+  --line: #2a323d;
+  --accent: #5b8cff;
+  --accent-strong: #7aa2ff;
+  --accent-weak: #1c2a4d;
+  --accent-tint: #24376a;
+  --hover: #232b36;
+  --danger: #ff6b76;
+  --ok: #63d4ad;
+  --warn-bg: #3a3218;
+  --err-bg: #3d2226;
+  --mention: #8fb0ff;
+  color-scheme: dark;
 }
 
 * {
@@ -238,6 +261,12 @@ hr {
 .workspace {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.workspace-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
 }
 .view {

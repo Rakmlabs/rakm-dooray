@@ -18,7 +18,15 @@ const PATHS = {
   send: 'M4 12l16-8-6 16-2-6z',
   eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   chevron: 'M9 6l6 6-6 6',
-  tag: 'M3 12V3h9l9 9-9 9z M7.5 7.5h.01'
+  tag: 'M3 12V3h9l9 9-9 9z M7.5 7.5h.01',
+  star: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z',
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M20 20l-4-4',
+  bell: 'M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z M10 21h4',
+  bellOff: 'M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z M10 21h4 M3 3l18 18',
+  user: 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M4 20a8 8 0 0 1 16 0',
+  grip: 'M9 6h.01 M15 6h.01 M9 12h.01 M15 12h.01 M9 18h.01 M15 18h.01',
+  offline: 'M2 8a15 15 0 0 1 20 0 M5 12a10 10 0 0 1 14 0 M8.5 15.5a5 5 0 0 1 7 0 M12 19h.01 M3 3l18 18',
+  page: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h5'
 } as const
 
 export type IconName = keyof typeof PATHS
