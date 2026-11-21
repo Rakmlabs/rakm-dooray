@@ -5,7 +5,7 @@ import { WikiView } from './views/Wiki'
 import { MailView } from './views/Mail'
 import { SettingsView } from './views/Settings'
 import { Icon, type IconName } from './components/Icon'
-import rakmMark from './assets/rakm-r.png'
+import rakmTile from './assets/rakm-app-tile.png'
 
 type Tab = 'messenger' | 'mail' | 'wiki' | 'settings'
 
@@ -47,7 +47,7 @@ export function App() {
     <div className="app">
       <nav className="rail" aria-label="기능 전환">
         <div className="rail-logo" title="RAKM LABS">
-          <img src={rakmMark} alt="RAKM" draggable={false} />
+          <img src={rakmTile} alt="RAKM" draggable={false} />
         </div>
         {TABS.map((t, i) => (
           <button

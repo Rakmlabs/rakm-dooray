@@ -3,7 +3,7 @@
 RAKM 전용 NHN Dooray 데스크톱 클라이언트 (메신저, 위키). Electron + React + TypeScript.
 연결 대상은 코드에 고정돼 있다: 회사 도메인 `rakm.dooray.com`, API `https://api.dooray.com` (`src/main/settings.ts`).
 메일(IMAP/SMTP) 코드는 남아 있지만 Free 플랜이라 IMAP 을 쓸 수 없어 화면에서는 숨겼다 (`src/renderer/src/App.tsx` 의 TABS).
-로고·아이콘은 회사 사이트 저장소(rakm-site)의 공식 파일을 복사해 쓴다: `build/icon.png`(앱·Dock 아이콘, rakm-site `src/app/icon.png`), `src/renderer/src/assets/rakm-r.png`(사이드바 R 마크, rakm-site `docs/brand/favicon-source-r.png`).
+로고·아이콘은 회사 사이트 저장소(rakm-site)의 R 마크 원본 `docs/brand/favicon-source-r.png` 로 만든다: 파란 판(#2f6bff, 1024 캔버스 안 824 판, 모서리 반경 185, 옅은 그림자) 위에 흰 R. `build/icon.png`·`icon.icns`·`icon.ico`(앱·Dock 아이콘), `src/renderer/src/assets/rakm-app-tile.png`(사이드바).
 서버 없이 각자 자기 컴퓨터에 토큰을 넣어 쓴다. 네트워크 호출은 전부 main 프로세스에서 하고, 화면(renderer)은 IPC 로만 받는다.
 
 API 조사 결과와 근거는 [docs/API_RESEARCH.md](docs/API_RESEARCH.md) 에 있다.

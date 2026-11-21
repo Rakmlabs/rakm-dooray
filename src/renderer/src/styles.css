@@ -203,19 +203,17 @@ hr {
 .rail-spacer {
   flex: 1;
 }
-/* 레일 맨 위의 RAKM R 마크. 앱에서 브랜드가 보이는 유일한 자리라 흰 타일 위에 원래 색 그대로 둔다 */
+/* 레일 맨 위의 RAKM 앱 아이콘 (Dock 아이콘과 같은 파란 판 + 흰 R) */
 .rail-logo {
   width: 40px;
   height: 40px;
   margin: 18px 0 14px;
-  border-radius: 11px;
-  background: #fff;
   display: grid;
   place-items: center;
 }
 .rail-logo img {
-  width: 26px;
-  height: auto;
+  width: 40px;
+  height: 40px;
   display: block;
   user-select: none;
 }
