@@ -20,6 +20,8 @@ interface Props {
   canLoadMore?: boolean
   onLoadMore?: () => void
   highlightId?: string | null
+  /** 이 시각 이후 메시지 앞에 "여기까지 읽음" 구분선 (셸이 넘긴다, 채팅 영역이 그린다) */
+  readMarkerAt?: string | null
 }
 
 export function MessageList(props: Props) {

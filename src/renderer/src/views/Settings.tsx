@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { SecretSource, TestResult } from '@shared/types'
 import { call, errorText } from '../api'
 import { useApp } from '../state'
+import { ChatSettings } from '../components/chat/ChatSettings'
+import { FileSettings } from '../components/files/FileSettings'
 
 // 메일 설정(IMAP/SMTP)은 지금 쓰지 않아 화면에서 뺐다 (Free 플랜이라 IMAP 불가). main 쪽 코드와 IPC 는 남아 있다.
 
@@ -112,6 +114,9 @@ export function SettingsView() {
           {doorayTest && <span className={doorayTest.ok ? 'ok' : 'err'}>{doorayTest.message}</span>}
         </div>
       </form>
+
+      <ChatSettings />
+      <FileSettings />
 
       <div className="card">
         <h2>단축키</h2>
