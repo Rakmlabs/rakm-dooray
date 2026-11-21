@@ -1,0 +1,115 @@
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import type { Member, PublicSettings, RealtimeStatus, UiState } from '@shared/types'
+import { call, onEvent } from './api'
+
+interface AppState {
+  settings: PublicSettings | null
+  reloadSettings: () => Promise<void>
+  ui: UiState
+  updateUi: (fn: (prev: UiState) => UiState) => void
+  realtime: RealtimeStatus
+  toast: (msg: string, kind?: 'error' | 'info') => void
+}
+
+const EMPTY_UI: UiState = { projects: [], channelProject: {}, lastSeenAt: {}, hiddenChannels: [] }
+const Ctx = createContext<AppState | null>(null)
+
+export function useApp(): AppState {
+  const v = useContext(Ctx)
+  if (!v) throw new Error('AppProvider 밖에서 사용됨')
+  return v
+}
+
+export function AppProvider({ children }: { children: ReactNode }) {
+  const [settings, setSettings] = useState<PublicSettings | null>(null)
+  const [ui, setUi] = useState<UiState>(EMPTY_UI)
+  const [realtime, setRealtime] = useState<RealtimeStatus>({ mode: 'off', detail: '' })
+  const [toasts, setToasts] = useState<{ id: number; msg: string; kind: 'error' | 'info' }[]>([])
+  const saveTimer = useRef<number | null>(null)
+
+  const reloadSettings = useCallback(async () => {
+    setSettings(await call('settings:get'))
+  }, [])
+
+  useEffect(() => {
+    void reloadSettings()
+    void call('ui:get').then(setUi)
+    void call('realtime:status').then(setRealtime)
+    return onEvent('realtime:status', setRealtime)
+  }, [reloadSettings])
+
+  const updateUi = useCallback((fn: (prev: UiState) => UiState) => {
+    setUi((prev) => {
+      const next = fn(prev)
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      saveTimer.current = window.setTimeout(() => void call('ui:save', next), 400)
+      return next
+    })
+  }, [])
+
+  const toast = useCallback((msg: string, kind: 'error' | 'info' = 'error') => {
+    const id = Date.now() + Math.random()
+    setToasts((t) => [...t, { id, msg, kind }])
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 6000 : 3000)
+  }, [])
+
+  return (
+    <Ctx.Provider value={{ settings, reloadSettings, ui, updateUi, realtime, toast }}>
+      {children}
+      <div className="toasts" role="status" aria-live="polite">
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast toast-${t.kind}`}>
+            {t.msg}
+          </div>
+        ))}
+      </div>
+    </Ctx.Provider>
+  )
+}
+
+// ---------- 멤버 이름 캐시 ----------
+
+const memberCache = new Map<string, Member | null>()
+const pending = new Map<string, Promise<void>>()
+const listeners = new Set<() => void>()
+
+function requestMember(id: string): void {
+  if (memberCache.has(id) || pending.has(id)) return
+  const p = call('messenger:member', id)
+    .then((m) => {
+      memberCache.set(id, m)
+    })
+    .catch(() => {
+      memberCache.set(id, null)
+    })
+    .finally(() => {
+      pending.delete(id)
+      listeners.forEach((l) => l())
+    })
+  pending.set(id, p)
+}
+
+export function rememberMember(m: Member): void {
+  memberCache.set(m.id, m)
+}
+
+/** id → 이름. 모르는 id 는 백그라운드로 조회하고 도착하면 다시 그린다. */
+export function useMemberNames(): (id: string | null) => string | null {
+  const [, force] = useState(0)
+  useEffect(() => {
+    const l = () => force((n) => n + 1)
+    listeners.add(l)
+    return () => {
+      listeners.delete(l)
+    }
+  }, [])
+  return useCallback((id: string | null) => {
+    if (!id) return null
+    const m = memberCache.get(id)
+    if (m === undefined) {
+      requestMember(id)
+      return null
+    }
+    return m?.name ?? null
+  }, [])
+}

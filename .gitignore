@@ -1,4 +1,9 @@
-.env
 node_modules/
-dist/
 out/
+dist/
+release/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
