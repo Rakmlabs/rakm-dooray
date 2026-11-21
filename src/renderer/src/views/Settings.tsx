@@ -6,6 +6,9 @@ import { ChatSettings } from '../components/chat/ChatSettings'
 import { FileSettings } from '../components/files/FileSettings'
 import { AppearanceSettings, NotificationSettings, Shortcuts, StorageSettings, WindowSettings } from '../shell/ShellSettings'
 
+/** 새 버전은 여기서 내려받는다 (비공개 저장소라 자동 업데이트는 하지 않는다) */
+const RELEASES_URL = 'https://github.com/Rakmlabs/rakm-dooray/releases'
+
 // 메일 설정(IMAP/SMTP)은 지금 쓰지 않아 화면에서 뺐다 (Free 플랜이라 IMAP 불가). main 쪽 코드와 IPC 는 남아 있다.
 
 function sourceText(s: SecretSource): string {
@@ -65,6 +68,12 @@ export function SettingsView() {
       <h1>설정</h1>
       <p className="muted">
         <b>{settings.dooray.domain}</b> 에 연결합니다. 토큰은 OS 키체인으로 암호화해 이 컴퓨터에만 저장합니다.
+      </p>
+      <p className="muted small">
+        버전 {__APP_VERSION__} ·{' '}
+        <button type="button" className="link" onClick={() => void call('shell:openExternal', RELEASES_URL)}>
+          새 버전 내려받기 (GitHub 릴리스)
+        </button>
       </p>
       {!settings.secureStorage && (
         <div className="banner banner-warn">
