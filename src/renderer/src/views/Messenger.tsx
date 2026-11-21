@@ -16,6 +16,8 @@ import {
 } from '../lib/projects'
 import { formatTime } from '../lib/format'
 import { MessageList } from '../components/MessageList'
+import { FileDropArea } from '../components/files/FileDropArea'
+import { FileGallery } from '../components/files/FileGallery'
 import { Composer } from '../components/Composer'
 import { ThreadPanel, type OpenThread } from '../components/ThreadPanel'
 import { Modal } from '../components/Modal'
@@ -344,6 +346,7 @@ function ChannelPane({
   const [tab, setTab] = useState<'chat' | 'threads'>('chat')
   const [mode, setMode] = useState<ComposeMode>({ kind: 'normal' })
   const [newTopic, setNewTopic] = useState(false)
+  const [gallery, setGallery] = useState(false)
   const { messages, error, reload, loadMore, canLoadMore } = useChannelLogs(channel.id, active, 100)
   const threads = useMemo(() => collectThreads(messages), [messages])
   const project = ui.projects.find((p) => p.id === ui.channelProject[channel.id]) ?? null
@@ -409,13 +412,17 @@ function ChannelPane({
         <button className="primary small" onClick={() => setNewTopic(true)} title="프로젝트·제목을 붙여 스레드로 새 주제를 연다">
           <Icon name="plus" size={14} /> 새 주제
         </button>
+        <button className="icon-btn" onClick={() => setGallery(true)} title="파일 모아보기" aria-label="파일 모아보기">
+          <Icon name="clip" size={16} />
+        </button>
         <button className="icon-btn" onClick={() => void reload()} title="새로고침" aria-label="새로고침">
           <Icon name="refresh" size={16} />
         </button>
       </div>
       {error && <div className="banner banner-err">{error}</div>}
+      {gallery && <FileGallery channelId={channel.id} messages={messages} onClose={() => setGallery(false)} />}
       {tab === 'chat' ? (
-        <>
+        <FileDropArea channelId={channel.id} onUploaded={() => void reload()}>
           <MessageList
             messages={messages}
             meId={me?.id ?? null}
@@ -440,7 +447,7 @@ function ChannelPane({
               }
             }}
           />
-        </>
+        </FileDropArea>
       ) : (
         <ThreadList
           threads={threads}

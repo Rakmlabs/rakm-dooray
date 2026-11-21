@@ -2,10 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Message } from '@shared/types'
 import { call, errorText } from '../api'
 import { useApp, useMemberNames } from '../state'
-import { formatDay, formatSize, formatTime } from '../lib/format'
+import { formatDay, formatTime } from '../lib/format'
 import { renderMarkdown } from '../lib/markdown'
 import { parseTopic } from '../lib/projects'
 import { Icon } from './Icon'
+import { FileAttachment } from './files/FileAttachment'
 
 interface Props {
   messages: Message[]
@@ -129,16 +130,6 @@ function MessageItem({
     }
   }
 
-  async function download() {
-    if (!m.file) return
-    try {
-      const saved = await call('messenger:downloadFile', m.channelId, m.file.id, m.file.name)
-      if (saved) toast(`저장했습니다: ${saved}`, 'info')
-    } catch (e) {
-      toast(errorText(e))
-    }
-  }
-
   if (system) {
     return <div className="msg-system">{m.text}</div>
   }
@@ -185,13 +176,7 @@ function MessageItem({
           {m.text && <div className="msg-body md" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.text) }} />}
         </>
       )}
-      {m.file && (
-        <button className="file-chip" onClick={() => void download()} title="내려받기">
-          <Icon name="clip" size={14} />
-          <span>{m.file.name}</span>
-          {m.file.size !== null && <span className="muted">{formatSize(m.file.size)}</span>}
-        </button>
-      )}
+      {m.file && <FileAttachment message={m} />}
       {m.thread && !inThread && (
         <button className="thread-chip" onClick={() => onOpenThread?.(m)}>
           <Icon name="thread" size={14} />

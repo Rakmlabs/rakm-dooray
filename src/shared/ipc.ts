@@ -17,12 +17,16 @@ import type {
   WikiPage,
   WikiPageSummary
 } from './types'
+import { WIKI_AREA_CHANNELS, WIKI_AREA_EVENTS, type WikiAreaContract, type WikiAreaEvents } from './ipc-wiki'
+import { FILES_AREA_CHANNELS, FILES_AREA_EVENTS, type FilesAreaContract, type FilesAreaEvents } from './ipc-files'
+import { CHAT_AREA_CHANNELS, CHAT_AREA_EVENTS, type ChatAreaContract, type ChatAreaEvents } from './ipc-chat'
+import { SHELL_AREA_CHANNELS, SHELL_AREA_EVENTS, type ShellAreaContract, type ShellAreaEvents } from './ipc-shell'
 
 /**
  * renderer → main 요청 목록. 키가 IPC 채널 이름이다.
  * preload 는 이 목록에 있는 채널만 통과시킨다.
  */
-export interface IpcContract {
+interface CoreContract {
   'settings:get': { args: []; result: PublicSettings }
   'settings:save': { args: [SettingsInput]; result: PublicSettings }
   'settings:testDooray': { args: []; result: TestResult }
@@ -83,17 +87,21 @@ export interface IpcContract {
   'shell:openExternal': { args: [url: string]; result: null }
 }
 
+/** 기본 계약 + 영역별 계약(ipc-wiki/files/chat/shell.ts) */
+export interface IpcContract extends CoreContract, WikiAreaContract, FilesAreaContract, ChatAreaContract, ShellAreaContract {}
+
 export type IpcChannel = keyof IpcContract
 
 /** main → renderer 이벤트 */
-export interface IpcEvents {
+interface CoreEvents {
   'realtime:status': RealtimeStatus
   'messenger:activity': MessengerActivity
 }
+export interface IpcEvents extends CoreEvents, WikiAreaEvents, FilesAreaEvents, ChatAreaEvents, ShellAreaEvents {}
 
 export type IpcEventName = keyof IpcEvents
 
-export const IPC_CHANNELS: IpcChannel[] = [
+const CORE_CHANNELS: (keyof CoreContract)[] = [
   'settings:get',
   'settings:save',
   'settings:testDooray',
@@ -141,5 +149,20 @@ export const IPC_CHANNELS: IpcChannel[] = [
   'shell:openExternal'
 ]
 
-export const IPC_EVENTS: IpcEventName[] = ['realtime:status', 'messenger:activity']
+export const IPC_CHANNELS: IpcChannel[] = [
+  ...CORE_CHANNELS,
+  ...WIKI_AREA_CHANNELS,
+  ...FILES_AREA_CHANNELS,
+  ...CHAT_AREA_CHANNELS,
+  ...SHELL_AREA_CHANNELS
+]
+
+export const IPC_EVENTS: IpcEventName[] = [
+  'realtime:status',
+  'messenger:activity',
+  ...WIKI_AREA_EVENTS,
+  ...FILES_AREA_EVENTS,
+  ...CHAT_AREA_EVENTS,
+  ...SHELL_AREA_EVENTS
+]
 

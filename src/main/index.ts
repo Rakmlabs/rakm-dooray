@@ -7,6 +7,11 @@ import { MessengerApi } from './dooray/messenger'
 import { WikiApi } from './dooray/wiki'
 import { RealtimeService } from './dooray/realtime'
 import { MailService } from './mail/service'
+import { chatAreaHandlers } from './handlers/chat'
+import { filesAreaHandlers } from './handlers/files'
+import { shellAreaHandlers } from './handlers/shell'
+import type { MainContext } from './handlers/types'
+import { wikiAreaHandlers } from './handlers/wiki'
 import { DOORAY_DOMAIN, getPublicSettings, getSecret, getSettings, getUiState, saveSettings, saveUiState } from './settings'
 
 // 이름을 바꾸면 userData 경로도 바뀌어 저장된 토큰·설정을 잃는다. 경로는 예전 이름(dooray-client)으로 고정하고 표시 이름만 바꾼다.
@@ -81,7 +86,13 @@ function safeName(n: string): string {
 
 type Handlers = { [K in IpcChannel]: (...args: IpcContract[K]['args']) => Promise<IpcContract[K]['result']> }
 
+const ctx: MainContext = { http, messenger, wiki, getWindow: () => win, emit, pickFiles, saveAs }
+
 const handlers: Handlers = {
+  ...wikiAreaHandlers(ctx),
+  ...filesAreaHandlers(ctx),
+  ...chatAreaHandlers(ctx),
+  ...shellAreaHandlers(ctx),
   'settings:get': () => getPublicSettings(),
   'settings:save': async (input) => {
     const r = await saveSettings(input)

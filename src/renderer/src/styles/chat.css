@@ -1,0 +1,10 @@
+/* 메시지 표시·프로필·입력 편의 영역 스타일. 이 영역 작업자만 고친다. 색은 styles.css 의 :root 토큰(var(--accent) 등)만 쓴다. */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent-weak);
+  color: var(--accent-strong);
+  font-weight: 700;
+}

@@ -3,6 +3,10 @@
 //   DOORAY_MOCK_BASE=http://127.0.0.1:8787 npm run dev
 // 응답 형태는 docs/API_RESEARCH.md 의 공식 문서·커뮤니티 실측 형태를 따른다. 실제 두레이와 다를 수 있다.
 import { createServer } from 'node:http'
+import * as wikiArea from './mock/wiki.mjs'
+import * as filesArea from './mock/files.mjs'
+import * as chatArea from './mock/chat.mjs'
+import * as shellArea from './mock/shell.mjs'
 
 const PORT = Number(process.env.PORT || 8787)
 const ME = 'm-me'
@@ -95,6 +99,11 @@ createServer(async (req, res) => {
     res.end(JSON.stringify(obj))
   }
   if (req.headers.authorization !== 'dooray-api mock-token') return send(401, { header: { isSuccessful: false, resultCode: -1, resultMessage: '인증 실패' } })
+  const state = { members, channels, logs, wikis, wikiPages, comments, ME, log, iso, now }
+  // 영역별 경로가 먼저 (각 영역 작업자가 scripts/mock/*.mjs 에서만 고친다)
+  for (const area of [wikiArea, filesArea, chatArea, shellArea]) {
+    if (await area.handle({ req, res, url, p, send, ok, body, state })) return
+  }
   let m
   if (p === '/common/v1/members/me') return send(200, ok({ id: ME, name: members[ME] }))
   if ((m = p.match(/^\/common\/v1\/members\/([^/]+)$/))) return send(200, ok({ id: m[1], name: members[m[1]] ?? m[1] }))
