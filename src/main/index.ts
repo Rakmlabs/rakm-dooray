@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { IPC_CHANNELS, type IpcChannel, type IpcContract, type IpcEventName, type IpcEvents } from '@shared/ipc'
@@ -9,7 +9,10 @@ import { RealtimeService } from './dooray/realtime'
 import { MailService } from './mail/service'
 import { chatAreaBeforeReady, chatAreaHandlers, chatAreaSetup } from './handlers/chat'
 import { filesAreaBeforeReady, filesAreaHandlers, filesAreaSetup } from './handlers/files'
-import { shellAreaBeforeReady, shellAreaHandlers, shellAreaSetup } from './handlers/shell'
+import { shellAreaBeforeReady, shellAreaHandlers, shellAreaSetup, shellHooks, shellService } from './handlers/shell'
+import { applyLoginItem, savedBounds, trackWindow, TrayControl } from './local/window'
+import { ZOOM } from './local/rules'
+import type { ShellState } from '@shared/types-shell'
 import type { MainContext } from './handlers/types'
 import { wikiAreaBeforeReady, wikiAreaHandlers, wikiAreaSetup } from './handlers/wiki'
 import { DOORAY_DOMAIN, getPublicSettings, getSecret, getSettings, getUiState, saveSettings, saveUiState } from './settings'
@@ -36,7 +39,10 @@ const realtime = new RealtimeService({
   http,
   getDomain: () => DOORAY_DOMAIN,
   onStatus: (s) => emit('realtime:status', s),
-  onActivity: (channelId) => emit('messenger:activity', { channelId })
+  onActivity: (channelId) => {
+    emit('messenger:activity', { channelId })
+    shellService()?.noteActivity(channelId)
+  }
 })
 const mail = new MailService(async () => {
   const s = getSettings().mail
@@ -119,8 +125,17 @@ const handlers: Handlers = {
   'ui:save': async (s) => saveUiState(s),
 
   'messenger:me': () => messenger.me(),
-  'messenger:channels': () => messenger.channels(),
-  'messenger:logs': (channelId, size) => messenger.logs(channelId, size),
+  // 받아 온 목록·메시지는 셸 영역의 로컬 보관함(안 읽음·검색·1000개 이전 기록)에도 넣는다
+  'messenger:channels': async () => {
+    const list = await messenger.channels()
+    shellService()?.noteChannels(list)
+    return list
+  },
+  'messenger:logs': async (channelId, size) => {
+    const list = await messenger.logs(channelId, size)
+    shellService()?.ingest(channelId, list, Math.min(1000, Math.max(1, Math.round(size))))
+    return list
+  },
   'messenger:member': (id) => messenger.member(id),
   'messenger:searchMembers': (name) => messenger.searchMembers(name),
   'messenger:send': (c, text) => messenger.send(c, text),
@@ -144,12 +159,24 @@ const handlers: Handlers = {
   'realtime:restart': () => realtime.restart(),
 
   'wiki:list': () => wiki.wikis(),
-  'wiki:pages': (w, parent) => wiki.pages(w, parent),
-  'wiki:page': (w, p) => wiki.page(w, p),
+  'wiki:pages': async (w, parent) => {
+    const list = await wiki.pages(w, parent)
+    shellService()?.noteWikiPages(w, list)
+    return list
+  },
+  'wiki:page': async (w, p) => {
+    const page = await wiki.page(w, p)
+    shellService()?.noteWikiPage(page)
+    return page
+  },
   'wiki:create': (w, parent, subject, content) => wiki.create(w, parent, subject, content),
   'wiki:update': (w, p, subject, content) => wiki.update(w, p, subject, content),
   'wiki:move': (w, p, target) => wiki.move(w, p, target),
-  'wiki:delete': (w, p) => wiki.remove(w, p),
+  'wiki:delete': async (w, p) => {
+    const r = await wiki.remove(w, p)
+    shellService()?.noteWikiDeleted(p)
+    return r
+  },
   'wiki:comments': (w, p) => wiki.comments(w, p),
   'wiki:addComment': (w, p, content) => wiki.addComment(w, p, content),
   'wiki:updateComment': (w, p, c, content) => wiki.updateComment(w, p, c, content),
@@ -208,10 +235,45 @@ function registerIpc(): void {
   }
 }
 
+// ---------- 창·트레이 (셸 영역) ----------
+
+let quitting = false
+let shellState: ShellState | null = null
+const tray = new TrayControl(ICON_PATH, () => void showWindow(), () => {
+  quitting = true
+  app.quit()
+})
+
+/** 셸 설정(테마·글자 크기·트레이·자동 실행)을 적용한다 */
+function applyShellState(s: ShellState): void {
+  shellState = s
+  nativeTheme.themeSource = s.prefs.theme
+  if (win && !win.isDestroyed()) win.webContents.setZoomFactor(ZOOM[s.prefs.fontSize])
+  tray.set(s.prefs.tray)
+  applyLoginItem(s.prefs.openAtLogin)
+}
+
+/** 창을 앞으로 (닫혀 있으면 새로 만들고 화면이 다 뜰 때까지 기다린다) */
+async function showWindow(): Promise<void> {
+  if (!win || win.isDestroyed()) {
+    createWindow()
+    await new Promise<void>((resolve) => win!.webContents.once('did-finish-load', () => setTimeout(resolve, 800)))
+  }
+  if (win!.isMinimized()) win!.restore()
+  win!.show()
+  win!.focus()
+}
+
+shellHooks.showWindow = showWindow
+shellHooks.applyState = applyShellState
+
 function createWindow(): void {
+  const saved = savedBounds()
   win = new BrowserWindow({
-    width: 1360,
-    height: 860,
+    width: saved.width ?? 1360,
+    height: saved.height ?? 860,
+    x: saved.x,
+    y: saved.y,
     minWidth: 960,
     minHeight: 600,
     title: APP_TITLE,
@@ -226,7 +288,26 @@ function createWindow(): void {
       webSecurity: true
     }
   })
-  win.once('ready-to-show', () => win?.show())
+  win.once('ready-to-show', () => {
+    if (saved.maximized) win?.maximize()
+    win?.show()
+  })
+  trackWindow(win)
+  win.webContents.on('did-finish-load', () => {
+    if (shellState) win?.webContents.setZoomFactor(ZOOM[shellState.prefs.fontSize])
+  })
+  win.on('focus', () => shellService()?.onFocus())
+  // macOS 와 트레이 상주 중에는 닫기 = 숨기기 (다시 열 때 화면 상태가 그대로이고, 뒤에서 알림을 계속 받는다)
+  win.on('close', (e) => {
+    if (quitting) return
+    if (process.platform === 'darwin' || tray.enabled) {
+      e.preventDefault()
+      win?.hide()
+    }
+  })
+  win.on('closed', () => {
+    win = null
+  })
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^(https?:|mailto:)/i.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -256,13 +337,21 @@ app.whenReady().then(() => {
   registerIpc()
   createWindow()
   void realtime.restart()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
+  const s = shellService()
+  if (s) s.onUnread = (n) => tray.setUnread(n)
+  app.on('activate', () => void showWindow())
+})
+
+app.on('before-quit', () => {
+  quitting = true
+})
+
+app.on('will-quit', () => {
+  shellService()?.stop()
 })
 
 app.on('window-all-closed', () => {
   realtime.stop()
   void mail.close()
-  if (process.platform !== 'darwin') app.quit()
+  if (process.platform !== 'darwin' && !tray.enabled) app.quit()
 })
