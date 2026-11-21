@@ -175,7 +175,7 @@ export function MessageList(props: Props) {
         </button>
       )}
       {!props.canLoadMore && messages.length > 0 && messages.length >= 1000 && (
-        <div className="muted center small">두레이 API 제약으로 최신 1000개까지만 볼 수 있습니다.</div>
+        <div className="muted center small">이 컴퓨터에 받아 둔 기록은 여기까지입니다.</div>
       )}
       {messages.map((m) => {
         const day = m.sentAt ? formatDay(m.sentAt) : ''

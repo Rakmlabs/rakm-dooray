@@ -13,6 +13,7 @@ import { buildDoc, serializeDoc, type BuiltDoc, type PMNode } from '../wiki/mark
 import { usePageSave, type SaveStatus } from '../wiki/usePageSave'
 import { WIcon } from '../wiki/WikiIcons'
 import { WikiHtml, renderWikiMarkdown } from '../wiki/WikiHtml'
+import { onNav } from '../lib/nav'
 
 const ROOT = '__root__'
 
@@ -75,6 +76,23 @@ export function WikiView() {
     [wikiId, fetchChildren, toast]
   )
 
+  // 다른 화면(⌘K, 채팅의 위키 링크, 북마크 등)에서 온 위키 페이지 이동 요청
+  const wikiIdRef = useRef(wikiId)
+  wikiIdRef.current = wikiId
+  const pendingPage = useRef<string | null>(null)
+  useEffect(
+    () =>
+      onNav((req) => {
+        if (req.kind !== 'wikiPage') return
+        if (req.wikiId === wikiIdRef.current) setPageId(req.pageId)
+        else {
+          pendingPage.current = req.pageId
+          setWikiId(req.wikiId)
+        }
+      }),
+    []
+  )
+
   // 위키를 고르면: 최상위 페이지를 불러와 첫 단계를 펼치고, 홈(없으면 첫 페이지)을 바로 연다
   useEffect(() => {
     setChildren({})
@@ -92,7 +110,9 @@ export function WikiView() {
         const roots = await fetchChildren(wikiId, null)
         if (cancelled) return
         const home = wikis?.find((w) => w.id === wikiId)?.homePageId
-        setPageId(roots.find((r) => r.id === home)?.id ?? home ?? roots[0]?.id ?? null)
+        const wanted = pendingPage.current
+        pendingPage.current = null
+        setPageId(wanted ?? roots.find((r) => r.id === home)?.id ?? home ?? roots[0]?.id ?? null)
         setExpanded(new Set(roots.map((r) => r.id)))
         await Promise.all(roots.map((r) => fetchChildren(wikiId, r.id).catch(() => [])))
       } catch (e) {
