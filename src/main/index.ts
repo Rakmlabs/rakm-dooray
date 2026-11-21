@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { IPC_CHANNELS, type IpcChannel, type IpcContract, type IpcEventName, type IpcEvents } from '@shared/ipc'
@@ -7,7 +7,13 @@ import { MessengerApi } from './dooray/messenger'
 import { WikiApi } from './dooray/wiki'
 import { RealtimeService } from './dooray/realtime'
 import { MailService } from './mail/service'
-import { getPublicSettings, getSecret, getSettings, getUiState, saveSettings, saveUiState } from './settings'
+import { DOORAY_DOMAIN, getPublicSettings, getSecret, getSettings, getUiState, saveSettings, saveUiState } from './settings'
+
+// 이름을 바꾸면 userData 경로도 바뀌어 저장된 토큰·설정을 잃는다. 경로는 예전 이름(dooray-client)으로 고정하고 표시 이름만 바꾼다.
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), 'dooray-client'))
+app.setName('RAKM 두레이')
+const APP_TITLE = 'RAKM 두레이'
+const ICON_PATH = join(__dirname, '../../build/icon.png')
 
 let win: BrowserWindow | null = null
 
@@ -23,7 +29,7 @@ const messenger = new MessengerApi(http)
 const wiki = new WikiApi(http)
 const realtime = new RealtimeService({
   http,
-  getDomain: () => getSettings().dooray.domain,
+  getDomain: () => DOORAY_DOMAIN,
   onStatus: (s) => emit('realtime:status', s),
   onActivity: (channelId) => emit('messenger:activity', { channelId })
 })
@@ -197,7 +203,9 @@ function createWindow(): void {
     height: 860,
     minWidth: 960,
     minHeight: 600,
-    title: '두레이',
+    title: APP_TITLE,
+    // 패키징하면 실행 파일 아이콘을 쓰고, 개발 실행(윈도·리눅스)에서만 직접 지정한다
+    icon: !app.isPackaged && process.platform !== 'darwin' ? ICON_PATH : undefined,
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -226,6 +234,11 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // 개발 실행에서도 Dock 에 RAKM 아이콘이 보이게 한다 (패키징하면 electron-builder 가 build/icon.png 를 쓴다)
+  if (process.platform === 'darwin' && !app.isPackaged) {
+    const icon = nativeImage.createFromPath(ICON_PATH)
+    if (!icon.isEmpty()) app.dock?.setIcon(icon)
+  }
   registerIpc()
   createWindow()
   void realtime.restart()

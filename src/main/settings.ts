@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { PublicSettings, SecretSource, SettingsInput, UiState } from '@shared/types'
 import { parseDotEnv } from './dotenv'
+import { INVALID_TOKEN_MESSAGE, isValidToken } from './dooray/http'
 
 /**
  * 설정 저장소.
@@ -11,6 +12,10 @@ import { parseDotEnv } from './dotenv'
  * - 개발 모드(패키징 안 된 실행)에서 비밀 값이 저장돼 있지 않으면 프로젝트 루트 .env 를 읽는다
  * 비밀 값은 renderer 로 보내지 않고, 로그에도 남기지 않는다.
  */
+
+/** 이 앱은 한 회사(rakm)만 쓴다. 도메인과 API 주소(민간 클라우드)는 고정이고 설정에서 바꾸지 않는다. */
+export const DOORAY_DOMAIN = 'rakm.dooray.com'
+export const DOORAY_API_BASE = 'https://api.dooray.com'
 
 interface StoredSettings {
   dooray: { apiBase: string; domain: string; pollSeconds: number }
@@ -27,7 +32,7 @@ interface StoredSettings {
 type SecretKey = 'doorayToken' | 'mailPassword'
 
 const DEFAULTS: StoredSettings = {
-  dooray: { apiBase: 'https://api.dooray.com', domain: '', pollSeconds: 4 },
+  dooray: { apiBase: DOORAY_API_BASE, domain: DOORAY_DOMAIN, pollSeconds: 4 },
   mail: {
     address: '',
     displayName: '',
@@ -37,13 +42,6 @@ const DEFAULTS: StoredSettings = {
     smtpPort: 465
   }
 }
-
-const ALLOWED_API_BASES = [
-  'https://api.dooray.com',
-  'https://api.gov-dooray.com',
-  'https://api.gov-dooray.co.kr',
-  'https://api.dooray.co.kr'
-]
 
 const DEFAULT_UI: UiState = { projects: [], channelProject: {}, lastSeenAt: {}, hiddenChannels: [] }
 
@@ -104,15 +102,15 @@ function loadStored(): StoredSettings {
     dooray: { ...DEFAULTS.dooray, ...(raw.dooray ?? {}) },
     mail: { ...DEFAULTS.mail, ...(raw.mail ?? {}) }
   }
+  // 예전 버전에서 저장한 도메인·API 주소가 남아 있어도 무시하고 고정값을 쓴다
+  s.dooray.apiBase = DOORAY_API_BASE
+  s.dooray.domain = DOORAY_DOMAIN
   // 저장된 값이 없을 때만 개발용 .env 로 채운다
-  if (!raw.dooray?.apiBase && env.DOORAY_API_BASE) s.dooray.apiBase = env.DOORAY_API_BASE
-  if (!raw.dooray?.domain && env.DOORAY_DOMAIN) s.dooray.domain = env.DOORAY_DOMAIN
   if (!raw.mail?.address && env.MAIL_ADDRESS) s.mail.address = env.MAIL_ADDRESS
   if (!raw.mail?.imapHost && env.MAIL_IMAP_HOST) s.mail.imapHost = env.MAIL_IMAP_HOST
   if (!raw.mail?.imapPort && env.MAIL_IMAP_PORT) s.mail.imapPort = Number(env.MAIL_IMAP_PORT)
   if (!raw.mail?.smtpHost && env.MAIL_SMTP_HOST) s.mail.smtpHost = env.MAIL_SMTP_HOST
   if (!raw.mail?.smtpPort && env.MAIL_SMTP_PORT) s.mail.smtpPort = Number(env.MAIL_SMTP_PORT)
-  if (!ALLOWED_API_BASES.includes(s.dooray.apiBase)) s.dooray.apiBase = DEFAULTS.dooray.apiBase
   const mock = mockBase()
   if (mock) s.dooray.apiBase = mock
   return s
@@ -189,14 +187,16 @@ export async function saveSettings(input: SettingsInput): Promise<PublicSettings
     mail: { ...DEFAULTS.mail, ...(current.mail ?? {}) }
   }
   if (input.dooray) {
-    const { token, ...rest } = input.dooray
-    if (rest.apiBase !== undefined && !ALLOWED_API_BASES.includes(rest.apiBase)) {
-      throw new Error('지원하지 않는 API 주소입니다.')
+    const { token, pollSeconds } = input.dooray
+    if (pollSeconds !== undefined) next.dooray.pollSeconds = Math.min(60, Math.max(2, Math.round(pollSeconds)))
+    if (token !== undefined && token !== null) {
+      const t = token.trim()
+      // 붙여 넣다 한글·공백이 섞이면 저장하지 않는다 (그대로 두면 모든 호출이 ByteString 오류로 실패한다)
+      if (t && !isValidToken(t)) throw new Error(INVALID_TOKEN_MESSAGE)
+      await setSecret('doorayToken', t)
+    } else if (token === null) {
+      await setSecret('doorayToken', null)
     }
-    if (rest.pollSeconds !== undefined) rest.pollSeconds = Math.min(60, Math.max(2, Math.round(rest.pollSeconds)))
-    if (rest.domain !== undefined) rest.domain = rest.domain.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')
-    next.dooray = { ...next.dooray, ...rest }
-    if (token !== undefined) await setSecret('doorayToken', token === null ? null : token.trim())
   }
   if (input.mail) {
     const { password, ...rest } = input.mail

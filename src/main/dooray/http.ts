@@ -47,6 +47,60 @@ type Query = Record<string, string | number | boolean | null | undefined>
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** HTTP 헤더에 넣을 수 있는 토큰인지 (공백·한글 등 ASCII 밖 문자가 섞이면 fetch 가 ByteString 오류를 낸다) */
+export function isValidToken(token: string): boolean {
+  return /^[\x21-\x7E]+$/.test(token)
+}
+
+export const INVALID_TOKEN_MESSAGE =
+  '토큰에 한글이나 공백 같은 쓸 수 없는 문자가 섞였습니다. 두레이에서 발급한 토큰만 그대로 붙여 넣으세요.'
+
+/**
+ * 두레이 오류 메시지가 URL 인코딩(%EC%A1%B4...)된 채로 오는 경우가 있어 풀어서 보여준다.
+ * 풀 수 없는 문자열이면 그대로 둔다.
+ */
+export function decodeServerMessage(msg: string): string {
+  if (!/%[0-9A-Fa-f]{2}/.test(msg)) return msg
+  try {
+    return decodeURIComponent(msg.replace(/\+/g, ' '))
+  } catch {
+    return msg
+  }
+}
+
+/**
+ * JSON.parse 전에 16자리 이상 정수 리터럴을 문자열로 감싼다.
+ * 두레이 ID 는 19자리라 숫자로 오면 JS number 정밀도를 넘어 다른 ID 가 된다(조회 시 "존재하지 않는 페이지").
+ * 문자열 안의 숫자는 건드리지 않는다.
+ */
+export function parseJsonSafe(text: string): unknown {
+  if (!/\d{16}/.test(text)) return JSON.parse(text)
+  let out = ''
+  let i = 0
+  const n = text.length
+  while (i < n) {
+    const ch = text[i]
+    if (ch === '"') {
+      let j = i + 1
+      while (j < n && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
+      out += text.slice(i, j + 1)
+      i = j + 1
+      continue
+    }
+    if ((ch >= '0' && ch <= '9') || ch === '-') {
+      let j = i + 1
+      while (j < n && /[0-9eE+\-.]/.test(text[j])) j++
+      const num = text.slice(i, j)
+      out += /^-?\d{16,}$/.test(num) && !Number.isSafeInteger(Number(num)) ? `"${num}"` : num
+      i = j
+      continue
+    }
+    out += ch
+    i++
+  }
+  return JSON.parse(out)
+}
+
 /** api.dooray.com → dooray.com. 리다이렉트 대상이 같은 두레이 도메인 아래인지 판단하는 데 쓴다. */
 export function baseDomainOf(apiBase: string): string {
   const host = new URL(apiBase).hostname
@@ -100,7 +154,9 @@ export class DoorayHttp {
   private async config(): Promise<DoorayConfig> {
     const c = await this.getConfig()
     if (!c || !c.token) throw new NotConfiguredError('두레이 API 토큰이 설정되지 않았습니다. 설정 화면에서 토큰을 입력하세요.')
-    return c
+    const token = c.token.trim()
+    if (!isValidToken(token)) throw new NotConfiguredError(INVALID_TOKEN_MESSAGE)
+    return { ...c, token }
   }
 
   private url(apiBase: string, path: string, query?: Query): string {
@@ -128,14 +184,14 @@ export class DoorayHttp {
     const text = await res.text()
     if (text) {
       try {
-        body = JSON.parse(text) as Envelope<T>
+        body = parseJsonSafe(text) as Envelope<T>
       } catch {
         body = null
       }
     }
     const ok = res.ok && (body?.header?.isSuccessful ?? res.ok)
     if (!ok) {
-      const msg = body?.header?.resultMessage || statusMessage(res.status)
+      const msg = decodeServerMessage(body?.header?.resultMessage || '') || statusMessage(res.status)
       throw new DoorayApiError(`${what} 실패: ${msg}`, res.status, body?.header?.resultCode ?? null)
     }
     return { result: (body?.result ?? null) as T, totalCount: body?.totalCount }

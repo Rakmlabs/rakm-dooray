@@ -2,7 +2,7 @@
   "name": "dooray-client",
   "version": "0.1.0",
   "private": true,
-  "description": "NHN Dooray 커스텀 데스크톱 클라이언트 (메신저, 메일, 위키)",
+  "description": "RAKM 두레이 — NHN Dooray 커스텀 데스크톱 클라이언트 (메신저, 위키)",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -14,8 +14,11 @@
     "dist": "electron-vite build && electron-builder"
   },
   "build": {
-    "appId": "kr.local.dooray-client",
-    "productName": "Dooray Client",
+    "appId": "kr.co.rakm.dooray-client",
+    "productName": "RAKM Dooray",
+    "directories": {
+      "buildResources": "build"
+    },
     "files": [
       "out/**/*"
     ],

@@ -13,7 +13,7 @@ if (existsSync('.env')) {
     if (m && m[2]) env[m[1]] = m[2].replace(/^["']|["']$/g, '')
   }
 }
-const BASE = env.DOORAY_API_BASE || 'https://api.dooray.com'
+const BASE = 'https://api.dooray.com' // 앱과 같이 고정
 const TOKEN = env.DOORAY_TOKEN
 const results = []
 const report = (name, ok, detail) => {
@@ -74,8 +74,15 @@ if (!TOKEN) {
     report('GET /wiki/v1/wikis/{id}/pages', pages.status === 200, `HTTP ${pages.status}, 최상위 ${(pages.body?.result ?? []).length}개`)
     const p = pages.body?.result?.[0]
     if (p) {
-      const page = await get(`/wiki/v1/wikis/${w.id}/pages/${p.id}`)
-      report('GET 위키 페이지 본문', page.status === 200, `HTTP ${page.status}, mimeType=${page.body?.result?.body?.mimeType}`)
+      // 앱이 쓰는 공식 단건 조회. 응답 원문에서 ID 가 따옴표 없는 숫자로 오는지도 본다 (19자리면 JS 정밀도를 넘는다).
+      const page = await get(`/wiki/v1/pages/${p.id}`)
+      report('GET /wiki/v1/pages/{pageId}', page.status === 200, `HTTP ${page.status}, mimeType=${page.body?.result?.body?.mimeType}, wikiId 일치=${String(page.body?.result?.wikiId) === String(w.id)}`)
+      const raw = await (await fetch(`${BASE}/wiki/v1/wikis/${w.id}/pages`, { headers: { Authorization: `dooray-api ${TOKEN}` } })).text()
+      report('페이지 목록 ID 형식', true, /"id"\s*:\s*\d{16,}/.test(raw) ? '숫자(정밀도 손실 위험)' : '문자열')
+      const old = await get(`/wiki/v1/wikis/${w.id}/pages/${p.id}`)
+      report('(참고) GET /wiki/v1/wikis/{id}/pages/{id}', true, `HTTP ${old.status}`)
+      const cm = await get(`/wiki/v1/wikis/${page.body?.result?.wikiId ?? w.id}/pages/${p.id}/comments?page=0&size=5`)
+      report('GET 위키 페이지 댓글', cm.status === 200, `HTTP ${cm.status}, ${(cm.body?.result ?? []).length}개`)
     }
   }
 

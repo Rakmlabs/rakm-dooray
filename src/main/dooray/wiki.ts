@@ -91,8 +91,13 @@ export class WikiApi {
     return (list ?? []).map((p) => summary(p, wikiId))
   }
 
+  /**
+   * 공식 문서의 페이지 단건 조회는 위키 ID 없이 `GET /wiki/v1/pages/{page-id}` 다.
+   * (`/wikis/{wiki-id}/pages/{page-id}` 는 실사용에서 "존재하지 않는 페이지입니다" 로 실패했다.)
+   * 응답의 wikiId 를 돌려주므로 댓글·수정·파일 호출은 그 값을 쓴다.
+   */
   async page(wikiId: string, pageId: string): Promise<WikiPage> {
-    const p = await this.http.get<RawPage>(`/wiki/v1/wikis/${enc(wikiId)}/pages/${enc(pageId)}`)
+    const p = await this.http.get<RawPage>(`/wiki/v1/pages/${enc(pageId)}`)
     return {
       ...summary(p, wikiId),
       content: p.body?.content ?? '',

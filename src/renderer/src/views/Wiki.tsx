@@ -14,10 +14,20 @@ function previewSource(md: string): string {
   return md.replace(/\$\{toc\}/g, '')
 }
 
+const LAST_WIKI = 'wiki:last'
+
+function readLast(): string {
+  try {
+    return localStorage.getItem(LAST_WIKI) ?? ''
+  } catch {
+    return ''
+  }
+}
+
 export function WikiView() {
   const { settings, toast } = useApp()
   const configured = !!settings && settings.dooray.tokenSource !== 'none'
-  const [wikis, setWikis] = useState<Wiki[]>([])
+  const [wikis, setWikis] = useState<Wiki[] | null>(null)
   const [wikiId, setWikiId] = useState<string>('')
   const [children, setChildren] = useState<Record<string, WikiPageSummary[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -32,28 +42,60 @@ export function WikiView() {
       .then((list) => {
         setWikis(list)
         setError(null)
+        // 지난번에 보던 위키가 있으면 그것을, 없으면 첫 위키를 바로 연다
+        setWikiId((cur) => cur || (list.find((w) => w.id === readLast()) ?? list[0])?.id || '')
       })
       .catch((e) => setError(errorText(e)))
   }, [configured])
+
+  const fetchChildren = useCallback(
+    async (wid: string, parent: string | null) => {
+      const list = await call('wiki:pages', wid, parent)
+      setChildren((c) => ({ ...c, [parent ?? ROOT]: list }))
+      return list
+    },
+    []
+  )
 
   const loadChildren = useCallback(
     async (parent: string | null) => {
       if (!wikiId) return
       try {
-        const list = await call('wiki:pages', wikiId, parent)
-        setChildren((c) => ({ ...c, [parent ?? ROOT]: list }))
+        await fetchChildren(wikiId, parent)
       } catch (e) {
         toast(errorText(e))
       }
     },
-    [wikiId, toast]
+    [wikiId, fetchChildren, toast]
   )
 
+  // 위키를 고르면: 최상위 페이지를 불러와 첫 단계를 펼치고, 홈(없으면 첫 페이지)을 바로 연다
   useEffect(() => {
     setChildren({})
     setExpanded(new Set())
     setPageId(null)
-    if (wikiId) void loadChildren(null)
+    if (!wikiId) return
+    try {
+      localStorage.setItem(LAST_WIKI, wikiId)
+    } catch {
+      /* 저장 못 해도 동작에는 지장 없음 */
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const roots = await fetchChildren(wikiId, null)
+        if (cancelled) return
+        const home = wikis?.find((w) => w.id === wikiId)?.homePageId
+        setPageId(roots.find((r) => r.id === home)?.id ?? home ?? roots[0]?.id ?? null)
+        setExpanded(new Set(roots.map((r) => r.id)))
+        await Promise.all(roots.map((r) => fetchChildren(wikiId, r.id).catch(() => [])))
+      } catch (e) {
+        if (!cancelled) toast(errorText(e))
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [wikiId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const allPages = useMemo(() => Object.values(children).flat(), [children])
@@ -78,76 +120,87 @@ export function WikiView() {
 
   if (!configured) return <div className="empty">설정 화면에서 두레이 개인 API 토큰을 먼저 입력하세요.</div>
 
-  const filteredWikis = wikiFilter ? wikis.filter((w) => w.name.toLowerCase().includes(wikiFilter.toLowerCase())) : wikis
+  const list = wikis ?? []
+  const filteredWikis = wikiFilter ? list.filter((w) => w.name.toLowerCase().includes(wikiFilter.toLowerCase())) : list
+  const currentWiki = list.find((w) => w.id === wikiId)
 
   const renderTree = (parent: string, depth: number) =>
-    (children[parent] ?? []).map((p) => (
-      <div key={p.id}>
-        <div className={`tree-row ${pageId === p.id ? 'active' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}>
-          <button className={`chev ${expanded.has(p.id) ? 'open' : ''}`} onClick={() => toggle(p)} aria-label="하위 페이지 펼치기">
-            <Icon name="chevron" size={12} />
-          </button>
-          <button
-            className="tree-title ellipsis"
-            onClick={() => {
-              if (guard()) {
-                setDirty(false)
-                setPageId(p.id)
-              }
-            }}
-          >
-            {p.subject}
-          </button>
-        </div>
-        {expanded.has(p.id) &&
-          (children[p.id] ? (
-            children[p.id].length ? (
-              renderTree(p.id, depth + 1)
+    (children[parent] ?? []).map((p) => {
+      const kids = children[p.id]
+      const leaf = kids !== undefined && kids.length === 0
+      return (
+        <div key={p.id} role="treeitem" aria-expanded={leaf ? undefined : expanded.has(p.id)} aria-selected={pageId === p.id}>
+          <div className={`tree-row ${pageId === p.id ? 'active' : ''}`} style={{ paddingLeft: 6 + depth * 16 }}>
+            {leaf ? (
+              <span className="chev-space" />
             ) : (
-              <div className="muted small" style={{ paddingLeft: 30 + depth * 14 }}>
-                하위 페이지 없음
-              </div>
-            )
-          ) : (
-            <div className="muted small" style={{ paddingLeft: 30 + depth * 14 }}>
-              …
-            </div>
-          ))}
-      </div>
-    ))
-
-  return (
-    <div className="cols">
-      <aside className="list-col" aria-label="위키 목록">
-        <div className="pane-head column">
-          <input className="search" placeholder="위키 찾기" value={wikiFilter} onChange={(e) => setWikiFilter(e.target.value)} />
-          <select
-            value={wikiId}
-            onChange={(e) => {
-              if (guard()) {
-                setDirty(false)
-                setWikiId(e.target.value)
-              }
-            }}
-            aria-label="위키 선택"
-          >
-            <option value="">위키 선택 ({filteredWikis.length})</option>
-            {filteredWikis.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        {error && <div className="banner banner-err">{error}</div>}
-        <div className="list-scroll">{wikiId && renderTree(ROOT, 0)}</div>
-        {wikiId && (
-          <div className="list-foot">
-            <button className="small" onClick={() => void loadChildren(null)}>
-              <Icon name="refresh" size={14} /> 새로고침
+              <button className={`chev ${expanded.has(p.id) ? 'open' : ''}`} onClick={() => toggle(p)} aria-label="하위 페이지 펼치기">
+                <Icon name="chevron" size={12} />
+              </button>
+            )}
+            <button
+              className="tree-title ellipsis"
+              title={p.subject}
+              onClick={() => {
+                if (guard()) {
+                  setDirty(false)
+                  setPageId(p.id)
+                }
+              }}
+            >
+              {p.subject}
             </button>
           </div>
-        )}
+          {expanded.has(p.id) && !leaf && (kids ? <div role="group">{renderTree(p.id, depth + 1)}</div> : <div className="tree-loading" style={{ paddingLeft: 30 + depth * 16 }}>불러오는 중…</div>)}
+        </div>
+      )
+    })
+
+  return (
+    <div className="cols wiki">
+      <aside className="wiki-list-col" aria-label="위키 목록">
+        <div className="wiki-col-head">
+          <span className="col-title">위키</span>
+          <span className="muted small">{list.length}</span>
+        </div>
+        <div className="wiki-filter">
+          <input className="search" placeholder="위키 찾기" value={wikiFilter} onChange={(e) => setWikiFilter(e.target.value)} />
+        </div>
+        {error && <div className="banner banner-err">{error}</div>}
+        <nav className="list-scroll wiki-list">
+          {wikis === null && !error && <div className="muted small pad">불러오는 중…</div>}
+          {filteredWikis.map((w) => (
+            <button
+              key={w.id}
+              className={`wiki-item ${w.id === wikiId ? 'active' : ''}`}
+              aria-current={w.id === wikiId ? 'true' : undefined}
+              title={w.name}
+              onClick={() => {
+                if (w.id !== wikiId && guard()) {
+                  setDirty(false)
+                  setWikiId(w.id)
+                }
+              }}
+            >
+              <Icon name="book" size={15} />
+              <span className="ellipsis">{w.name}</span>
+            </button>
+          ))}
+          {wikis !== null && filteredWikis.length === 0 && <div className="muted small pad">{wikiFilter ? '맞는 위키가 없습니다.' : '볼 수 있는 위키가 없습니다.'}</div>}
+        </nav>
+      </aside>
+      <aside className="tree-col" aria-label="페이지 목록">
+        <div className="wiki-col-head">
+          <span className="col-title ellipsis">{currentWiki?.name ?? '페이지'}</span>
+          {wikiId && (
+            <button className="icon-btn" onClick={() => void loadChildren(null)} title="페이지 목록 새로고침" aria-label="페이지 목록 새로고침">
+              <Icon name="refresh" size={15} />
+            </button>
+          )}
+        </div>
+        <div className="list-scroll tree" role="tree">
+          {wikiId ? renderTree(ROOT, 0) : <div className="muted small pad">왼쪽에서 위키를 고르세요.</div>}
+        </div>
       </aside>
       <div className="body-col">
         {wikiId && pageId ? (
@@ -164,7 +217,7 @@ export function WikiView() {
             onTreeChanged={refreshParent}
           />
         ) : (
-          <div className="empty">{wikiId ? '왼쪽에서 페이지를 고르세요.' : '위키를 고르세요.'}</div>
+          <div className="empty">{wikiId ? '페이지를 불러오는 중이거나, 이 위키에 페이지가 없습니다.' : '위키를 고르세요.'}</div>
         )}
       </div>
     </div>
@@ -212,6 +265,8 @@ function PageView({
     void load()
   }, [load])
 
+  // 단건 조회 응답의 wikiId 를 쓴다 (목록에서 받은 위키 ID 와 다를 수 있다)
+  const wid = page?.wikiId || wikiId
   const dirty = !!page && editing && (subject !== page.subject || content !== page.content)
   useEffect(() => onDirty(dirty), [dirty, onDirty])
 
@@ -224,11 +279,19 @@ function PageView({
   if (error) return <div className="banner banner-err">{error}</div>
   if (!page) return <div className="empty">불러오는 중…</div>
 
+  function cancelEdit() {
+    if (!dirty || window.confirm('변경을 버릴까요?')) {
+      setSubject(page!.subject)
+      setContent(page!.content)
+      setEditing(false)
+    }
+  }
+
   async function save() {
     if (!subject.trim()) return toast('제목을 입력하세요.')
     setSaving(true)
     try {
-      await call('wiki:update', wikiId, pageId, subject.trim(), content)
+      await call('wiki:update', wid, pageId, subject.trim(), content)
       setEditing(false)
       await load()
       await onTreeChanged(page!.parentPageId)
@@ -243,7 +306,7 @@ function PageView({
   async function remove() {
     if (!window.confirm(`'${page!.subject}' 페이지를 삭제할까요? 하위 페이지도 함께 영향을 받을 수 있습니다.`)) return
     try {
-      await call('wiki:delete', wikiId, pageId)
+      await call('wiki:delete', wid, pageId)
       await onTreeChanged(page!.parentPageId)
       if (page!.parentPageId) onOpen(page!.parentPageId)
     } catch (e) {
@@ -253,34 +316,28 @@ function PageView({
 
   return (
     <div className="page">
-      <div className="pane-head">
+      <div className="page-head">
         {editing ? (
           <input className="title-input grow" value={subject} onChange={(e) => setSubject(e.target.value)} aria-label="제목" />
         ) : (
-          <h2 className="grow ellipsis">{page.subject}</h2>
+          <h1 className="page-title grow ellipsis" title={page.subject}>
+            {page.subject}
+          </h1>
         )}
+        <div className="seg" role="group" aria-label="보기 방식">
+          <button className={!editing ? 'on' : ''} aria-pressed={!editing} onClick={() => !editing || cancelEdit()}>
+            보기
+          </button>
+          <button className={editing ? 'on' : ''} aria-pressed={editing} onClick={() => setEditing(true)}>
+            <Icon name="edit" size={13} /> 편집
+          </button>
+        </div>
         {editing ? (
-          <>
-            <button
-              onClick={() => {
-                if (!dirty || window.confirm('변경을 버릴까요?')) {
-                  setSubject(page.subject)
-                  setContent(page.content)
-                  setEditing(false)
-                }
-              }}
-            >
-              취소
-            </button>
-            <button className="primary" disabled={saving || !dirty} onClick={() => void save()}>
-              {saving ? '저장 중…' : '저장'}
-            </button>
-          </>
+          <button className="primary" disabled={saving || !dirty} onClick={() => void save()} title="⌘S">
+            {saving ? '저장 중…' : '저장'}
+          </button>
         ) : (
           <>
-            <button className="primary small" onClick={() => setEditing(true)}>
-              <Icon name="edit" size={14} /> 편집
-            </button>
             <button className="small" onClick={() => setDialog('new')}>
               <Icon name="plus" size={14} /> 하위 페이지
             </button>
@@ -293,9 +350,11 @@ function PageView({
           </>
         )}
       </div>
-      {!editing && (
-        <div className="muted small pad">
-          {nameOf(page.creatorId) ?? ''} · 수정 {formatTime(page.updatedAt)} · 버전 {page.version}
+      {editing ? (
+        <div className="edit-hint muted small">왼쪽에 마크다운을 쓰면 오른쪽에 결과가 보입니다. ⌘S 로 저장.</div>
+      ) : (
+        <div className="page-meta muted small">
+          {nameOf(page.creatorId) ?? ''} 작성 · {formatTime(page.updatedAt)} 수정 · 버전 {page.version}
         </div>
       )}
       {editing ? (
@@ -317,8 +376,8 @@ function PageView({
       ) : (
         <div className="page-scroll">
           <article className="md wiki-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
-          <Attachments page={page} wikiId={wikiId} onChanged={load} />
-          <Comments wikiId={wikiId} pageId={pageId} />
+          <Attachments page={page} wikiId={wid} onChanged={load} />
+          <Comments wikiId={wid} pageId={pageId} />
         </div>
       )}
       {dialog === 'new' && (
@@ -326,7 +385,7 @@ function PageView({
           parent={page}
           onClose={() => setDialog(null)}
           onCreate={async (title) => {
-            const r = await call('wiki:create', wikiId, pageId, title, `# ${title}\n`)
+            const r = await call('wiki:create', wid, pageId, title, `# ${title}\n`)
             setDialog(null)
             await onTreeChanged(pageId)
             onOpen(r.id)
@@ -339,7 +398,7 @@ function PageView({
           pages={pages}
           onClose={() => setDialog(null)}
           onMove={async (target) => {
-            await call('wiki:move', wikiId, pageId, target)
+            await call('wiki:move', wid, pageId, target)
             setDialog(null)
             await onTreeChanged(page.parentPageId)
             await onTreeChanged(target)

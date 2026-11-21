@@ -5,12 +5,13 @@ import { WikiView } from './views/Wiki'
 import { MailView } from './views/Mail'
 import { SettingsView } from './views/Settings'
 import { Icon, type IconName } from './components/Icon'
+import rakmMark from './assets/rakm-r.png'
 
 type Tab = 'messenger' | 'mail' | 'wiki' | 'settings'
 
+// 메일은 지금 쓰지 않아 탭에서 뺐다 (Free 플랜이라 IMAP 불가). MailView 와 main 쪽 코드는 남겨 두었으니 다시 넣으려면 여기에 추가한다.
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'messenger', label: '메신저', icon: 'chat' },
-  { id: 'mail', label: '메일', icon: 'mail' },
   { id: 'wiki', label: '위키', icon: 'book' }
 ]
 
@@ -31,7 +32,7 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return
-      const map: Record<string, Tab> = { '1': 'messenger', '2': 'mail', '3': 'wiki', ',': 'settings' }
+      const map: Record<string, Tab> = { '1': 'messenger', '2': 'wiki', ',': 'settings' }
       const t = map[e.key]
       if (t) {
         e.preventDefault()
@@ -45,6 +46,9 @@ export function App() {
   return (
     <div className="app">
       <nav className="rail" aria-label="기능 전환">
+        <div className="rail-logo" title="RAKM LABS">
+          <img src={rakmMark} alt="RAKM" draggable={false} />
+        </div>
         {TABS.map((t, i) => (
           <button
             key={t.id}

@@ -1,7 +1,10 @@
-# dooray-client
+# RAKM 두레이 (dooray-client)
 
-NHN Dooray 커스텀 데스크톱 클라이언트 (메신저, 메일, 위키). Electron + React + TypeScript.
-서버 없이 각자 자기 컴퓨터에 토큰과 메일 계정을 넣어 쓴다. 네트워크 호출은 전부 main 프로세스에서 하고, 화면(renderer)은 IPC 로만 받는다.
+RAKM 전용 NHN Dooray 데스크톱 클라이언트 (메신저, 위키). Electron + React + TypeScript.
+연결 대상은 코드에 고정돼 있다: 회사 도메인 `rakm.dooray.com`, API `https://api.dooray.com` (`src/main/settings.ts`).
+메일(IMAP/SMTP) 코드는 남아 있지만 Free 플랜이라 IMAP 을 쓸 수 없어 화면에서는 숨겼다 (`src/renderer/src/App.tsx` 의 TABS).
+로고·아이콘은 회사 사이트 저장소(rakm-site)의 공식 파일을 복사해 쓴다: `build/icon.png`(앱·Dock 아이콘, rakm-site `src/app/icon.png`), `src/renderer/src/assets/rakm-r.png`(사이드바 R 마크, rakm-site `docs/brand/favicon-source-r.png`).
+서버 없이 각자 자기 컴퓨터에 토큰을 넣어 쓴다. 네트워크 호출은 전부 main 프로세스에서 하고, 화면(renderer)은 IPC 로만 받는다.
 
 API 조사 결과와 근거는 [docs/API_RESEARCH.md](docs/API_RESEARCH.md) 에 있다.
 
@@ -19,9 +22,9 @@ npm test                    # 단위 테스트
 npm run typecheck
 ```
 
-처음 켜면 설정 화면이 뜬다.
-- **두레이 개인 API 토큰**: 두레이 웹 "개인설정 > API > 개인 인증 토큰" 에서 발급 (메뉴가 없으면 관리자에게 요청)
-- **메일**: 메일 주소와 두레이 웹 "설정 > 메일 > IMAP" 화면의 비밀번호. 메일 포함 Business 플랜 이상 + 관리자가 IMAP 을 허용해야 한다.
+처음 켜면 설정 화면이 뜬다. 넣을 것은 토큰 하나다.
+- **두레이 개인 API 토큰**: 두레이 웹 "개인설정 > API > 개인 인증 토큰" 에서 발급 (메뉴가 없으면 관리자에게 요청).
+  한글·공백이 섞이면 저장하지 않는다 (앞뒤 공백은 자동으로 자른다).
 - 토큰·비밀번호는 Electron `safeStorage`(macOS 키체인 / Windows DPAPI / 리눅스 키링)로 암호화해 `userData/secrets.json` 에 둔다.
 
 ### 실제 계정으로 읽기 점검
@@ -39,7 +42,7 @@ npm run probe -- --socket  # Socket Mode 토큰 발급이 개인 토큰으로 �
 
 ```sh
 node scripts/mock-dooray.mjs                         # 127.0.0.1:8787
-DOORAY_MOCK_BASE=http://127.0.0.1:8787 npm run dev   # 메신저·위키가 가짜 데이터로 뜬다 (메일 제외)
+DOORAY_MOCK_BASE=http://127.0.0.1:8787 npm run dev   # 메신저·위키가 가짜 데이터로 뜬다
 ```
 
 ## 쓰는 법 — 프로젝트와 스레드
@@ -74,4 +77,6 @@ scripts/             probe-readonly.mjs (읽기 점검), mock-dooray.mjs (모의
 - 공식 실시간 수신 수단이 없다. Socket Mode 는 에이전트 토큰용으로 보이며 개인 토큰으로 되는지 미확인 → 기본은 폴링(열린 방 4초, 목록 30초).
 - 두레이 서버의 "읽음" 상태는 API 로 읽거나 쓸 수 없다. 안 읽음 표시는 앱이 채널 `updatedAt` 으로 추정한다.
 - "나와의 대화"(type=me)는 채널 목록 API 에 나오지 않는다.
+- 위키 페이지 단건 조회는 공식 `GET /wiki/v1/pages/{pageId}` 를 쓴다. `/wiki/v1/wikis/{wikiId}/pages/{pageId}` 는 실사용에서 "존재하지 않는 페이지" 로 실패했다.
+  19자리 ID 가 JSON 숫자로 오면 JS 정밀도를 넘으므로 응답은 큰 정수를 문자열로 바꿔 읽는다 (`parseJsonSafe`).
 - 메일은 IMAP/SMTP 뿐이며 Business 플랜 이상, 관리자 허용 필요, IMAP 폴더당 최대 5,000통.

@@ -41,10 +41,26 @@ const logs = {
   't-beta': [log('t-beta', 'm-dev', '재현 방법 정리했습니다', 1_200_000)]
 }
 
-const wikiPages = {
-  p1: { id: 'p1', wikiId: 'w1', parentPageId: null, subject: '홈', root: true, version: '3', body: '# 알파 위키\n\n- [ ] 릴리스 체크리스트\n- 회의록은 하위 페이지에\n\n```js\nconsole.log("hi")\n```' },
-  p2: { id: 'p2', wikiId: 'w1', parentPageId: 'p1', subject: '회의록 3월', root: false, version: '1', body: '## 3월 1일\n\n| 항목 | 담당 |\n|---|---|\n| 릴리스 | 김공동 |' }
-}
+const wikis = [
+  { id: 'w1', name: '알파 프로젝트', type: 'project', scope: 'private', project: { id: 'pr1' }, home: { pageId: 'p1' } },
+  { id: 'w2', name: '창업팀 공용', type: 'project', scope: 'private', project: { id: 'pr2' }, home: { pageId: 'q1' } },
+  { id: 'w3', name: '베타 결제 모듈', type: 'project', scope: 'private', project: { id: 'pr3' }, home: { pageId: 'r1' } }
+]
+const page = (id, wikiId, parentPageId, subject, body) => ({ id, wikiId, parentPageId, subject, root: !parentPageId, version: '3', body })
+const wikiPages = Object.fromEntries(
+  [
+    page('p1', 'w1', null, '알파 프로젝트 홈', '# 알파 프로젝트\n\n3월 릴리스를 목표로 하는 알파 프로젝트 위키입니다.\n\n## 이번 주 할 일\n\n- [x] 요구사항 정리\n- [ ] 릴리스 체크리스트 확정\n- [ ] QA 일정 공유\n\n## 링크\n\n- 회의록은 **회의록** 아래에 날짜별로 둡니다.\n- 설계 문서는 **설계** 아래에 둡니다.\n\n```js\nconst release = new Date(\'2026-03-15\')\n```\n\n> 질문은 창업팀 대화방 `[알파]` 스레드로 남겨 주세요.'),
+    page('p2', 'w1', 'p1', '회의록', '# 회의록\n\n날짜별 회의록 모음입니다.'),
+    page('p21', 'w1', 'p2', '3월 1일 킥오프', '## 3월 1일\n\n| 항목 | 담당 | 기한 |\n|---|---|---|\n| 릴리스 범위 | 김공동 | 3/3 |\n| QA 계획 | 박개발 | 3/8 |'),
+    page('p22', 'w1', 'p2', '3월 8일 점검', '## 3월 8일\n\n- QA 3/10 시작 확정'),
+    page('p3', 'w1', 'p1', '설계', '# 설계\n\n아키텍처와 API 설계.'),
+    page('p31', 'w1', 'p3', 'API 명세', '## API 명세\n\n`GET /v1/items`'),
+    page('p4', 'w1', 'p1', '릴리스 체크리스트', '- [ ] 버전 태그\n- [ ] 공지'),
+    page('q1', 'w2', null, '창업팀 공용 홈', '# 창업팀 공용\n\n공용 문서와 규칙.'),
+    page('q2', 'w2', 'q1', '온보딩', '# 온보딩\n\n첫 주에 할 일.'),
+    page('r1', 'w3', null, '베타 결제 모듈', '# 베타 결제 모듈\n\n결제 연동 문서.')
+  ].map((x) => [x.id, x])
+)
 const comments = { p1: [{ id: 'cm1', creator: { member: { organizationMemberId: 'm-co' } }, createdAt: iso(500_000), body: { content: '체크리스트 업데이트했어요' } }] }
 
 const ok = (result, extra = {}) => ({ header: { isSuccessful: true, resultCode: 0, resultMessage: '' }, result, ...extra })
@@ -117,23 +133,28 @@ createServer(async (req, res) => {
     ;(logs[m[1]] ??= []).push({ ...log(m[1], ME, JSON.stringify({ type: 0, text: b.text }), 0), type: 'REPLY' })
     return send(200, ok({ id: 'r', channelId: m[1] }))
   }
-  if (p === '/wiki/v1/wikis') return send(200, ok([{ id: 'w1', name: '알파 위키', type: 'project', scope: 'private', project: { id: 'pr1' }, home: { pageId: 'p1' } }], { totalCount: 1 }))
-  if (p === '/wiki/v1/wikis/w1/pages' && req.method === 'GET') {
+  if (p === '/wiki/v1/wikis') return send(200, ok(wikis, { totalCount: wikis.length }))
+  if ((m = p.match(/^\/wiki\/v1\/wikis\/([^/]+)\/pages$/)) && req.method === 'GET') {
     const parent = url.searchParams.get('parentPageId')
-    return send(200, ok(Object.values(wikiPages).filter((x) => (parent ? x.parentPageId === parent : x.root))))
+    return send(200, ok(Object.values(wikiPages).filter((x) => x.wikiId === m[1] && (parent ? x.parentPageId === parent : x.root)).map(({ body: _b, ...rest }) => rest)))
   }
-  if ((m = p.match(/^\/wiki\/v1\/wikis\/w1\/pages\/([^/]+)$/)) && req.method === 'GET') {
+  // 공식 단건 조회 (위키 ID 없이)
+  if ((m = p.match(/^\/wiki\/v1\/pages\/([^/]+)$/)) && req.method === 'GET') {
     const pg = wikiPages[m[1]]
-    if (!pg) return send(404, { header: { isSuccessful: false, resultCode: -1, resultMessage: '없음' } })
-    return send(200, ok({ ...pg, body: { mimeType: 'text/x-markdown', content: pg.body }, createdAt: iso(9e6), updatedAt: iso(3e6), creator: { member: { organizationMemberId: 'm-co' } }, files: [{ id: 'wf1', name: '첨부.xlsx', size: 5167 }], images: [] }))
+    if (!pg) return send(404, { header: { isSuccessful: false, resultCode: -1, resultMessage: encodeURIComponent('존재하지 않는 페이지입니다') } })
+    return send(200, ok({ ...pg, body: { mimeType: 'text/x-markdown', content: pg.body }, createdAt: iso(9e6), updatedAt: iso(3e6), creator: { member: { organizationMemberId: 'm-co' } }, files: pg.id === 'p1' ? [{ id: 'wf1', name: '릴리스일정.xlsx', size: 5167 }] : [], images: [] }))
   }
-  if ((m = p.match(/^\/wiki\/v1\/wikis\/w1\/pages\/([^/]+)\/(title|content)$/))) {
+  // 실사용에서 실패했던 경로를 흉내 낸다 (URL 인코딩된 오류 메시지)
+  if ((m = p.match(/^\/wiki\/v1\/wikis\/([^/]+)\/pages\/([^/]+)$/)) && req.method === 'GET') {
+    return send(404, { header: { isSuccessful: false, resultCode: -100, resultMessage: encodeURIComponent('존재하지 않는 페이지입니다') } })
+  }
+  if ((m = p.match(/^\/wiki\/v1\/wikis\/[^/]+\/pages\/([^/]+)\/(title|content)$/))) {
     const b = await body(req)
     if (m[2] === 'title') wikiPages[m[1]].subject = b.subject
     else wikiPages[m[1]].body = b.body.content
     return send(200, ok(null))
   }
-  if ((m = p.match(/^\/wiki\/v1\/wikis\/w1\/pages\/([^/]+)\/comments$/))) {
+  if ((m = p.match(/^\/wiki\/v1\/wikis\/[^/]+\/pages\/([^/]+)\/comments$/))) {
     if (req.method === 'GET') return send(200, ok(comments[m[1]] ?? []))
     const b = await body(req)
     ;(comments[m[1]] ??= []).push({ id: `cm${Date.now()}`, creator: { member: { organizationMemberId: ME } }, createdAt: new Date().toISOString(), body: b.body })
