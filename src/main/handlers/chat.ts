@@ -5,3 +5,9 @@ import type { HandlersFor, MainContext } from './types'
 export function chatAreaHandlers(_ctx: MainContext): HandlersFor<ChatAreaContract> {
   return {}
 }
+
+/** app ready 전에 한 번 (예: protocol.registerSchemesAsPrivileged). */
+export function chatAreaBeforeReady(): void {}
+
+/** app ready 후, 창을 만들기 전에 한 번 (예: protocol.handle, 트레이). */
+export function chatAreaSetup(_ctx: MainContext): void {}

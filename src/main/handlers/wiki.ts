@@ -5,3 +5,9 @@ import type { HandlersFor, MainContext } from './types'
 export function wikiAreaHandlers(_ctx: MainContext): HandlersFor<WikiAreaContract> {
   return {}
 }
+
+/** app ready 전에 한 번 (예: protocol.registerSchemesAsPrivileged). */
+export function wikiAreaBeforeReady(): void {}
+
+/** app ready 후, 창을 만들기 전에 한 번 (예: protocol.handle, 트레이). */
+export function wikiAreaSetup(_ctx: MainContext): void {}

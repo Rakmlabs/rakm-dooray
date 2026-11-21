@@ -7,11 +7,11 @@ import { MessengerApi } from './dooray/messenger'
 import { WikiApi } from './dooray/wiki'
 import { RealtimeService } from './dooray/realtime'
 import { MailService } from './mail/service'
-import { chatAreaHandlers } from './handlers/chat'
-import { filesAreaHandlers } from './handlers/files'
-import { shellAreaHandlers } from './handlers/shell'
+import { chatAreaBeforeReady, chatAreaHandlers, chatAreaSetup } from './handlers/chat'
+import { filesAreaBeforeReady, filesAreaHandlers, filesAreaSetup } from './handlers/files'
+import { shellAreaBeforeReady, shellAreaHandlers, shellAreaSetup } from './handlers/shell'
 import type { MainContext } from './handlers/types'
-import { wikiAreaHandlers } from './handlers/wiki'
+import { wikiAreaBeforeReady, wikiAreaHandlers, wikiAreaSetup } from './handlers/wiki'
 import { DOORAY_DOMAIN, getPublicSettings, getSecret, getSettings, getUiState, saveSettings, saveUiState } from './settings'
 
 // 이름을 바꾸면 userData 경로도 바뀌어 저장된 토큰·설정을 잃는다. 경로는 예전 이름(dooray-client)으로 고정하고 표시 이름만 바꾼다.
@@ -244,7 +244,10 @@ function createWindow(): void {
   }
 }
 
+for (const f of [wikiAreaBeforeReady, filesAreaBeforeReady, chatAreaBeforeReady, shellAreaBeforeReady]) f()
+
 app.whenReady().then(() => {
+  for (const f of [wikiAreaSetup, filesAreaSetup, chatAreaSetup, shellAreaSetup]) f(ctx)
   // 개발 실행에서도 Dock 에 RAKM 아이콘이 보이게 한다 (패키징하면 electron-builder 가 build/icon.png 를 쓴다)
   if (process.platform === 'darwin' && !app.isPackaged) {
     const icon = nativeImage.createFromPath(ICON_PATH)
