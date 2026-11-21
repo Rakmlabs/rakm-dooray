@@ -1,5 +1,5 @@
 // 채팅 영역 renderer 쪽 작은 공유 상태 (설정·북마크·프로필·답장 참조). 모듈 캐시 + 구독.
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import type { Message } from '@shared/types'
 import type { ChatBookmark, ChatPrefs, MemberProfile, ReplyRef } from '@shared/types-chat'
 import { call } from '../../api'
@@ -225,13 +225,4 @@ export function plainSummary(text: string, max = 120): string {
     .replace(/\s+/g, ' ')
     .trim()
   return t.length > max ? t.slice(0, max - 1) + '…' : t
-}
-
-export function useNow(intervalMs = 60_000): number {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), intervalMs)
-    return () => window.clearInterval(t)
-  }, [intervalMs])
-  return now
 }
