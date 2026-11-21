@@ -12,10 +12,10 @@ import { Placeholder } from '@tiptap/extensions'
 import { NodeSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { call } from '../api'
-import { renderMarkdown } from '../lib/markdown'
 import { schemaExtensions } from './extensions'
 import type { PMNode } from './markdown-model'
 import { WIcon } from './WikiIcons'
+import { WikiHtml, renderWikiMarkdown } from './WikiHtml'
 
 interface EditorEnv {
   wikiId: string
@@ -63,7 +63,7 @@ function RawView({ node, updateAttributes, selected, deleteNode }: NodeViewProps
   const [editing, setEditing] = useState(false)
   const [text, setText] = useState(source)
   const isToc = source.trim() === '${toc}'
-  const html = useMemo(() => renderMarkdown(source.replace(/\$\{toc\}/g, ''), { breaks: false }), [source])
+  const html = useMemo(() => renderWikiMarkdown(source.replace(/\$\{toc\}/g, '')), [source])
   const finish = () => {
     setEditing(false)
     if (text !== source) {
@@ -109,7 +109,11 @@ function RawView({ node, updateAttributes, selected, deleteNode }: NodeViewProps
           </div>
         </div>
       ) : (
-        !isToc && <div className="md wk-raw-preview" contentEditable={false} dangerouslySetInnerHTML={{ __html: html }} />
+        !isToc && (
+          <div contentEditable={false}>
+            <WikiHtml className="md wk-raw-preview" html={html} wikiId={env.wikiId} pageId={env.pageId} />
+          </div>
+        )
       )}
     </NodeViewWrapper>
   )

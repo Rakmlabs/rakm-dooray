@@ -63,6 +63,29 @@ export const MdRaw = Node.create({
   }
 })
 
+/**
+ * 본문 이미지. 두레이 경로(/wikis/.../files/...)는 HTML 로 내보낼 때(복사·끌기·편집기 정리) src 대신 data-wk-src 로 쓴다.
+ * 그대로 src 로 두면 브라우저가 file:///wikis/... 로 요청한다. 화면 표시는 노드 뷰가 main 에서 받아 온다.
+ */
+const WikiImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      src: {
+        default: null,
+        parseHTML: (el: HTMLElement) => el.getAttribute('src') ?? el.getAttribute('data-wk-src'),
+        renderHTML: (a: Record<string, unknown>) => {
+          const src = typeof a.src === 'string' ? a.src : ''
+          return /^(https?:|data:image\/|blob:)/i.test(src) ? { src } : { 'data-wk-src': src }
+        }
+      }
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'img[src]:not([src^="data:"])' }, { tag: 'img[data-wk-src]' }]
+  }
+})
+
 /** 화면용 노드 뷰 (스키마는 바꾸지 않는다) */
 export interface NodeViews {
   image?: NodeViewRenderer
@@ -83,7 +106,7 @@ export function schemaExtensions(views: NodeViews = {}): AnyExtension[] {
     TableRow,
     TableHeader,
     TableCell,
-    (views.image ? Image.extend({ addNodeView: () => views.image! }) : Image).configure({ inline: true, allowBase64: false }),
+    (views.image ? WikiImage.extend({ addNodeView: () => views.image! }) : WikiImage).configure({ inline: true, allowBase64: false }),
     views.mdRaw ? MdRaw.extend({ addNodeView: () => views.mdRaw! }) : MdRaw,
     BlockId
   ]

@@ -12,6 +12,7 @@ import { BlockEditor } from '../wiki/BlockEditor'
 import { buildDoc, serializeDoc, type BuiltDoc, type PMNode } from '../wiki/markdown-model'
 import { usePageSave, type SaveStatus } from '../wiki/usePageSave'
 import { WIcon } from '../wiki/WikiIcons'
+import { WikiHtml, renderWikiMarkdown } from '../wiki/WikiHtml'
 
 const ROOT = '__root__'
 
@@ -449,7 +450,7 @@ function PageBody({
     [wikiId, page.id, toast]
   )
 
-  const previewHtml = useMemo(() => (mode === 'raw' ? renderMarkdown(previewSource(rawText), { breaks: false }) : ''), [mode, rawText])
+  const previewHtml = useMemo(() => (mode === 'raw' ? renderWikiMarkdown(previewSource(rawText)) : ''), [mode, rawText])
   const rawCount = built.rawBlocks.length
 
   return (
@@ -531,7 +532,7 @@ function PageBody({
               spellCheck={false}
               aria-label="마크다운 원문"
             />
-            <div className="md preview wiki-body" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+            <WikiHtml className="md preview wiki-body" html={previewHtml} wikiId={wikiId} pageId={page.id} />
           </div>
         )}
         <Attachments page={page} wikiId={wikiId} onChanged={onReload} />
