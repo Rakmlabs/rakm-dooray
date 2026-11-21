@@ -48,13 +48,19 @@
     "vitest": "^5.1.1"
   },
   "dependencies": {
+    "cfb": "^1.2.2",
+    "docx-preview": "^0.4.1",
     "dompurify": "^3.4.18",
+    "highlight.js": "^11.12.0",
     "imapflow": "^2.12.2",
+    "jszip": "^3.10.2",
     "mailparser": "^3.15.0",
     "marked": "^18.2.1",
     "nodemailer": "^10.6.1",
+    "pdfjs-dist": "^6.5.438",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "read-excel-file": "^9.3.20",
     "ws": "^8.23.0"
   }
 }
