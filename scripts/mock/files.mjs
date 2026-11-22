@@ -48,7 +48,7 @@ function seed(state) {
     const size = fileBytes(files.get(id)).length
     // 실제 응답처럼 mimeType 이 없을 수도 있다 (null 이면 넣지 않는다)
     const file = { id, name, fileSize: size, ...(mime ? { mimeType: mime } : {}) }
-    list.push({ ...state.log('c-general', sender === 'm-me' ? state.ME : sender, '', ago), type: 'FILE', file })
+    list.push({ ...state.log('c-general', sender === 'm-me' ? (state.BASE_ME ?? state.ME) : sender, '', ago), type: 'FILE', file })
   }
 }
 

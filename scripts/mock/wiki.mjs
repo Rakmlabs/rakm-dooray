@@ -153,7 +153,7 @@ export async function handle({ req, res, url, p, send, ok, body, state }) {
         body: { mimeType: 'text/x-markdown', content: pg.body },
         createdAt: state.iso(9e6),
         updatedAt: mt.updatedAt,
-        creator: { member: { organizationMemberId: 'm-co' } },
+        creator: { member: { organizationMemberId: pg.creator ?? 'm-co' } },
         files: [...(pg.id === 'p1' ? [{ id: 'wf1', name: '릴리스일정.xlsx', size: 5167 }] : []), ...pageFiles.filter((f) => f.type === 'general').map(fileOut)],
         images: pageFiles.filter((f) => f.type === 'inline_image').map(fileOut)
       })

@@ -16,6 +16,8 @@ import { LinkPreviewCard } from './chat/LinkPreviewCard'
 import { BookmarksPanel } from './chat/BookmarksPanel'
 import { WikiSendDialog } from './chat/WikiSendDialog'
 import { bookmarkKey, copyText, notePendingReply, plainSummary, useBookmarks, useReplyRefs } from './chat/chatStore'
+import { lastSeqBySender, unreadBy } from '@shared/receipts'
+import { membersOf, useReceipts } from '../lib/receipts'
 
 interface Props {
   messages: Message[]
@@ -36,6 +38,8 @@ interface Props {
   /** 목록 오른쪽 위 북마크 진입 버튼 (기본: 스레드 밖에서만 보임) */
   showBookmarksEntry?: boolean
 }
+
+const NO_IDS: string[] = []
 
 /** 같은 사람이 이 간격 안에 이어 보낸 메시지는 묶는다 */
 const GROUP_GAP_MS = 5 * 60 * 1000
@@ -85,6 +89,10 @@ export function useRichContentClicks(meId: string | null) {
 
 export function MessageList(props: Props) {
   const { messages, meId, inThread, readMarkerAt } = props
+  // 읽음 확인: 내 메시지를 아직 이 앱에서 읽지 않은 사람 (기록이 있는 사람만 센다)
+  const receipts = useReceipts()
+  const laterBy = useMemo(() => lastSeqBySender(messages), [messages])
+  const receiptMembers = membersOf(props.parentChannelId ?? messages[0]?.channelId)
   const { toast } = useApp()
   const scroller = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
@@ -205,6 +213,7 @@ export function MessageList(props: Props) {
               {...props}
               m={m}
               mine={!!meId && m.senderId === meId}
+              unreadIds={receipts.enabled && meId && m.senderId === meId ? unreadBy(m, receiptMembers, receipts, laterBy) : NO_IDS}
               grouped={grouped}
               system={system}
               editing={editingId === m.id}
@@ -251,6 +260,8 @@ function DrawerEsc({ onClose }: { onClose: () => void }) {
 interface ItemProps extends Props {
   m: Message
   mine: boolean
+  /** 이 내 메시지를 아직 이 앱에서 읽지 않은 사람 */
+  unreadIds: string[]
   grouped: boolean
   system: boolean
   editing: boolean
@@ -273,6 +284,7 @@ function clockOf(iso: string | null): string {
 function MessageItem({
   m,
   mine,
+  unreadIds,
   grouped,
   system,
   inThread,
@@ -422,6 +434,15 @@ function MessageItem({
           </button>
         )}
       </div>
+      {unreadIds.length > 0 && !deleted && (
+        <span
+          className="receipt-unread"
+          title={`${unreadIds.map((id) => nameOf(id)).join(', ')}님이 이 앱에서 아직 읽지 않음 (두레이 모바일·웹에서 읽은 것은 표시되지 않습니다)`}
+          aria-label={`안 읽은 사람 ${unreadIds.length}명`}
+        >
+          {unreadIds.length}
+        </span>
+      )}
       {!editing && !deleted && (
         <div className="msg-actions" role="toolbar" aria-label="메시지 동작">
           {onReply && (

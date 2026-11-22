@@ -4,6 +4,7 @@ import { call, errorText } from '../api'
 import { useApp } from '../state'
 import { ChatSettings } from '../components/chat/ChatSettings'
 import { FileSettings } from '../components/files/FileSettings'
+import { ReceiptsSettings } from '../components/ReceiptsSettings'
 import { AppearanceSettings, NotificationSettings, Shortcuts, StorageSettings, WindowSettings } from '../shell/ShellSettings'
 
 /** 새 버전은 여기서 내려받는다 (비공개 저장소라 자동 업데이트는 하지 않는다) */
@@ -129,6 +130,7 @@ export function SettingsView() {
 
       <AppearanceSettings />
       <NotificationSettings />
+      <ReceiptsSettings />
       <ChatSettings />
       <FileSettings />
       <WindowSettings />

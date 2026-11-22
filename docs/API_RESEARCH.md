@@ -59,7 +59,12 @@
 - dooray-go/dooray-sdk 의 채널 모델(openapi/model/messenger/channel.go)과 Socket Mode 이벤트, my13each/DoorayMCPwithMessenger 의
   `Channel`·`ChannelMessage` 타입(id, seq, type, sender, sentAt, text, flags, attachments, file)에도 읽음 관련 필드가 없다. `seq` 는 메시지 순번.
 - 실제 응답에 문서에 없는 필드가 오는지는 `npm run probe -- --fields` 로 필드 이름만 뽑아 확인할 수 있다 (실계정 미확인).
-- 결론: 상대가 내 메시지를 읽었는지는 공개 API 로 알 수 없어 앱에 표시하지 않는다. 두레이 웹의 비공개 API 를 세션 쿠키로 부르는 방식은 쓰지 않는다.
+- 결론: 상대가 내 메시지를 읽었는지는 공개 API 로 알 수 없다. 두레이 웹의 비공개 API 를 세션 쿠키로 부르는 방식은 쓰지 않는다.
+- 대안(v0.1.2 에 구현): 앱끼리 위키 페이지에 "대화방별 마지막으로 읽은 메시지 seq" 를 써서 주고받는다.
+  - 운반체 비교: 메신저 채널(알림·소음 → 금지), 드라이브 덮어쓰기(새 버전 생성, 307 두 단계, 개인 드라이브는 상대가 못 봄) → 위키 `PUT .../content` 가 가장 조용하다(알림 없음, 버전만 쌓임).
+  - 위치: 비개인 위키 중 (wikiId, pageId) 가 가장 작은 곳의 홈 아래 표식 있는 루트. 동시에 처음 켜 둘 다 만들면 2초 뒤 다시 훑어 작은 ID 쪽으로 모인다(남은 하나는 버려진 채로 남을 수 있다).
+  - 믿는 조건: 본문의 표식·memberId 가 맞고 페이지 `creator` 가 그 사람일 때만.
+  - 요청량: 쓰기 사람당 최대 30초 1회(바뀔 때만), 읽기 창이 앞이면 10초마다 상대 수만큼 GET, 상대 찾기 5분(못 찾으면 30초)마다 목록 1회.
 
 ### 요청 제한 (공식)
 - 토큰 버킷, 1초마다 `X-RateLimit-Replenish-Rate` 만큼 보충, 최대 `X-RateLimit-Burst-Capacity`. 수치는 고지 없이 바뀔 수 있어 헤더를 보라고 한다.

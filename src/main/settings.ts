@@ -143,7 +143,8 @@ async function storedSecret(key: SecretKey): Promise<string | null> {
 const ENV_KEYS: Record<SecretKey, string> = { doorayToken: 'DOORAY_TOKEN', mailPassword: 'MAIL_PASSWORD' }
 
 async function secretWithSource(key: SecretKey): Promise<{ value: string | null; source: SecretSource }> {
-  if (key === 'doorayToken' && mockBase()) return { value: 'mock-token', source: 'env' }
+  // 모의 서버: 두 번째 사용자로 띄우려면 DOORAY_MOCK_USER=co (읽음 확인을 두 앱으로 시험할 때)
+  if (key === 'doorayToken' && mockBase()) return { value: process.env.DOORAY_MOCK_USER === 'co' ? 'mock-token-co' : 'mock-token', source: 'env' }
   const stored = await storedSecret(key)
   if (stored) return { value: stored, source: 'keychain' }
   const envValue = devEnv()[ENV_KEYS[key]]

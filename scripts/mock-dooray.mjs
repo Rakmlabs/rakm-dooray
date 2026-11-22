@@ -69,7 +69,7 @@ const comments = { p1: [{ id: 'cm1', creator: { member: { organizationMemberId: 
 
 const ok = (result, extra = {}) => ({ header: { isSuccessful: true, resultCode: 0, resultMessage: '' }, result, ...extra })
 
-function rawChannel(c) {
+function rawChannel(c, actor = ME) {
   return {
     id: c.id,
     title: c.title,
@@ -77,7 +77,7 @@ function rawChannel(c) {
     status: 'normal',
     updatedAt: c.updatedAt,
     users: { participants: c.members.map((m) => ({ type: 'member', member: { organizationMemberId: m } })) },
-    me: { type: 'member', member: { organizationMemberId: ME }, role: 'member' }
+    me: { type: 'member', member: { organizationMemberId: actor }, role: 'member' }
   }
 }
 
@@ -98,18 +98,24 @@ createServer(async (req, res) => {
     res.writeHead(code, { 'content-type': 'application/json' })
     res.end(JSON.stringify(obj))
   }
-  if (req.headers.authorization !== 'dooray-api mock-token') return send(401, { header: { isSuccessful: false, resultCode: -1, resultMessage: '인증 실패' } })
-  const state = { members, channels, logs, wikis, wikiPages, comments, ME, log, iso, now }
+  // 두 번째 사용자(김공동)로 쓰려면 토큰 'mock-token-co' (읽음 확인을 두 앱으로 시험할 때)
+  const USERS = { 'dooray-api mock-token': ME, 'dooray-api mock-token-co': 'm-co' }
+  const actor = USERS[req.headers.authorization]
+  if (!actor) return send(401, { header: { isSuccessful: false, resultCode: -1, resultMessage: '인증 실패' } })
+  const state = { members, channels, logs, wikis, wikiPages, comments, ME: actor, BASE_ME: ME, log, iso, now }
   // 영역별 경로가 먼저 (각 영역 작업자가 scripts/mock/*.mjs 에서만 고친다)
   for (const area of [wikiArea, filesArea, chatArea, shellArea]) {
     if (await area.handle({ req, res, url, p, send, ok, body, state })) return
   }
   let m
-  if (p === '/common/v1/members/me') return send(200, ok({ id: ME, name: members[ME] }))
+  if (p === '/common/v1/members/me') return send(200, ok({ id: actor, name: members[actor] }))
   if ((m = p.match(/^\/common\/v1\/members\/([^/]+)$/))) return send(200, ok({ id: m[1], name: members[m[1]] ?? m[1] }))
   if (p === '/common/v1/members') return send(200, ok(Object.entries(members).filter(([, n]) => n.includes(url.searchParams.get('name') ?? '')).map(([id, name]) => ({ id, name, externalEmailAddress: `${id}@example.com` }))))
   if (p === '/common/v1/socket-mode/tokens') return send(403, { header: { isSuccessful: false, resultCode: -1, resultMessage: '에이전트 토큰 전용 (모의)' } })
-  if (p === '/messenger/v1/channels' && req.method === 'GET') return send(200, ok(channels.map(rawChannel), { totalCount: channels.length }))
+  if (p === '/messenger/v1/channels' && req.method === 'GET') {
+    const mine = channels.filter((c) => c.members.includes(actor))
+    return send(200, ok(mine.map((c) => rawChannel(c, actor)), { totalCount: mine.length }))
+  }
   if ((m = p.match(/^\/messenger\/v1\/channels\/([^/]+)\/logs$/))) {
     const id = m[1]
     if (req.method === 'GET') {
@@ -117,7 +123,7 @@ createServer(async (req, res) => {
       return send(200, { header: { isSuccessful: true, resultCode: 0, resultMessage: null }, result: (logs[id] ?? []).slice(-size).reverse() })
     }
     const b = await body(req)
-    const l = log(id, ME, b.text, 0)
+    const l = log(id, actor, b.text, 0)
     ;(logs[id] ??= []).push(l)
     const c = channels.find((x) => x.id === id)
     if (c) c.updatedAt = new Date().toISOString()
@@ -126,8 +132,8 @@ createServer(async (req, res) => {
   if ((m = p.match(/^\/messenger\/v1\/channels\/([^/]+)\/threads\/create-and-send$/))) {
     const b = await body(req)
     const tid = `t-${Date.now()}`
-    logs[tid] = b.threadText ? [log(tid, ME, b.threadText, 0)] : []
-    ;(logs[m[1]] ??= []).push(log(m[1], ME, b.text, 0, { thread: { channelId: tid, totalCount: String(logs[tid].length), lastUpdatedAt: Date.now() } }))
+    logs[tid] = b.threadText ? [log(tid, actor, b.threadText, 0)] : []
+    ;(logs[m[1]] ??= []).push(log(m[1], actor, b.text, 0, { thread: { channelId: tid, totalCount: String(logs[tid].length), lastUpdatedAt: Date.now() } }))
     return send(200, ok({ id: 'x', channelId: tid }))
   }
   if ((m = p.match(/^\/messenger\/v1\/channels\/([^/]+)\/logs\/([^/]+)$/))) {
@@ -139,7 +145,7 @@ createServer(async (req, res) => {
   }
   if ((m = p.match(/^\/messenger\/v1\/channels\/([^/]+)\/logs\/([^/]+)\/reply$/))) {
     const b = await body(req)
-    ;(logs[m[1]] ??= []).push({ ...log(m[1], ME, JSON.stringify({ type: 0, text: b.text }), 0), type: 'REPLY' })
+    ;(logs[m[1]] ??= []).push({ ...log(m[1], actor, JSON.stringify({ type: 0, text: b.text }), 0), type: 'REPLY' })
     return send(200, ok({ id: 'r', channelId: m[1] }))
   }
   if (p === '/wiki/v1/wikis') return send(200, ok(wikis, { totalCount: wikis.length }))
@@ -163,10 +169,17 @@ createServer(async (req, res) => {
     else wikiPages[m[1]].body = b.body.content
     return send(200, ok(null))
   }
+  // 페이지 만들기 (읽음 확인 저장 페이지 등)
+  if ((m = p.match(/^\/wiki\/v1\/wikis\/([^/]+)\/pages$/)) && req.method === 'POST') {
+    const b = await body(req)
+    const id = `np${Date.now()}${Math.floor(Math.random() * 1000)}`
+    wikiPages[id] = { ...page(id, m[1], b.parentPageId ?? null, b.subject ?? '', b.body?.content ?? ''), creator: actor }
+    return send(200, ok({ id }))
+  }
   if ((m = p.match(/^\/wiki\/v1\/wikis\/[^/]+\/pages\/([^/]+)\/comments$/))) {
     if (req.method === 'GET') return send(200, ok(comments[m[1]] ?? []))
     const b = await body(req)
-    ;(comments[m[1]] ??= []).push({ id: `cm${Date.now()}`, creator: { member: { organizationMemberId: ME } }, createdAt: new Date().toISOString(), body: b.body })
+    ;(comments[m[1]] ??= []).push({ id: `cm${Date.now()}`, creator: { member: { organizationMemberId: actor } }, createdAt: new Date().toISOString(), body: b.body })
     return send(201, ok({ id: 'x' }))
   }
   send(404, { header: { isSuccessful: false, resultCode: -1, resultMessage: `모의 서버에 없는 경로: ${req.method} ${p}` } })

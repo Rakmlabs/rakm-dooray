@@ -21,6 +21,7 @@ import { WIKI_AREA_CHANNELS, WIKI_AREA_EVENTS, type WikiAreaContract, type WikiA
 import { FILES_AREA_CHANNELS, FILES_AREA_EVENTS, type FilesAreaContract, type FilesAreaEvents } from './ipc-files'
 import { CHAT_AREA_CHANNELS, CHAT_AREA_EVENTS, type ChatAreaContract, type ChatAreaEvents } from './ipc-chat'
 import { SHELL_AREA_CHANNELS, SHELL_AREA_EVENTS, type ShellAreaContract, type ShellAreaEvents } from './ipc-shell'
+import { RECEIPTS_AREA_CHANNELS, RECEIPTS_AREA_EVENTS, type ReceiptsAreaContract, type ReceiptsAreaEvents } from './ipc-receipts'
 
 /**
  * renderer → main 요청 목록. 키가 IPC 채널 이름이다.
@@ -88,7 +89,7 @@ interface CoreContract {
 }
 
 /** 기본 계약 + 영역별 계약(ipc-wiki/files/chat/shell.ts) */
-export interface IpcContract extends CoreContract, WikiAreaContract, FilesAreaContract, ChatAreaContract, ShellAreaContract {}
+export interface IpcContract extends CoreContract, WikiAreaContract, FilesAreaContract, ChatAreaContract, ShellAreaContract, ReceiptsAreaContract {}
 
 export type IpcChannel = keyof IpcContract
 
@@ -97,7 +98,7 @@ interface CoreEvents {
   'realtime:status': RealtimeStatus
   'messenger:activity': MessengerActivity
 }
-export interface IpcEvents extends CoreEvents, WikiAreaEvents, FilesAreaEvents, ChatAreaEvents, ShellAreaEvents {}
+export interface IpcEvents extends CoreEvents, WikiAreaEvents, FilesAreaEvents, ChatAreaEvents, ShellAreaEvents, ReceiptsAreaEvents {}
 
 export type IpcEventName = keyof IpcEvents
 
@@ -154,7 +155,8 @@ export const IPC_CHANNELS: IpcChannel[] = [
   ...WIKI_AREA_CHANNELS,
   ...FILES_AREA_CHANNELS,
   ...CHAT_AREA_CHANNELS,
-  ...SHELL_AREA_CHANNELS
+  ...SHELL_AREA_CHANNELS,
+  ...RECEIPTS_AREA_CHANNELS
 ]
 
 export const IPC_EVENTS: IpcEventName[] = [
@@ -163,6 +165,7 @@ export const IPC_EVENTS: IpcEventName[] = [
   ...WIKI_AREA_EVENTS,
   ...FILES_AREA_EVENTS,
   ...CHAT_AREA_EVENTS,
-  ...SHELL_AREA_EVENTS
+  ...SHELL_AREA_EVENTS,
+  ...RECEIPTS_AREA_EVENTS
 ]
 

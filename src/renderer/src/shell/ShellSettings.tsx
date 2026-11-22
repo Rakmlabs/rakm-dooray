@@ -62,7 +62,7 @@ export function AppearanceSettings() {
   )
 }
 
-function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+export function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
     <label className="toggle-row">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />

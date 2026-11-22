@@ -4,6 +4,7 @@ import type { ChannelSummary } from '@shared/types-shell'
 import { call, errorText, onEvent } from '../api'
 import { rememberMember, useApp, useMemberNames } from '../state'
 import { useChannelLogs, useInterval } from '../lib/hooks'
+import { setChannelMembers, useReportSeen } from '../lib/receipts'
 import {
   channelTitle,
   collectThreads,
@@ -70,6 +71,7 @@ export function MessengerView({ active }: { active: boolean }) {
     try {
       const list = await call('messenger:channels')
       setChannels(list)
+      setChannelMembers(list)
       setLoaded(true)
       setError(null)
       return list
@@ -448,7 +450,7 @@ export function MessengerView({ active }: { active: boolean }) {
         )}
       </div>
 
-      {thread && <ThreadPanel thread={thread} meId={me?.id ?? null} onClose={() => setThread(null)} />}
+      {thread && <ThreadPanel thread={thread} meId={me?.id ?? null} visible={active} onClose={() => setThread(null)} />}
 
       {dialog?.kind === 'projects' && <ProjectsDialog onClose={() => setDialog(null)} />}
       {dialog?.kind === 'newChannel' && (
@@ -683,6 +685,8 @@ function ChannelPane({
   const [newTopic, setNewTopic] = useState(false)
   const [gallery, setGallery] = useState(false)
   const { messages, error, reload, loadMore, canLoadMore, ensure } = useChannelLogs(channel.id, active, 100)
+  // 읽음 확인: 대화 탭이 실제로 보일 때만 읽은 위치를 알린다
+  useReportSeen(channel.id, messages, active && tab === 'chat')
   const threads = useMemo(() => collectThreads(messages), [messages])
   const muted = !!shell?.prefs.notify.muted.includes(channel.id)
 

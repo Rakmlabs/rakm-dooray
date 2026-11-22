@@ -15,6 +15,7 @@ import { ZOOM } from './local/rules'
 import type { ShellState } from '@shared/types-shell'
 import type { MainContext } from './handlers/types'
 import { wikiAreaBeforeReady, wikiAreaHandlers, wikiAreaSetup } from './handlers/wiki'
+import { receiptsAreaHandlers, receiptsAreaSetup } from './handlers/receipts'
 import { DOORAY_DOMAIN, getPublicSettings, getSecret, getSettings, getUiState, saveSettings, saveUiState } from './settings'
 
 // 이름을 바꾸면 userData 경로도 바뀌어 저장된 토큰·설정을 잃는다. 경로는 예전 이름(dooray-client)으로 고정하고 표시 이름만 바꾼다.
@@ -99,6 +100,7 @@ const handlers: Handlers = {
   ...filesAreaHandlers(ctx),
   ...chatAreaHandlers(ctx),
   ...shellAreaHandlers(ctx),
+  ...receiptsAreaHandlers(ctx),
   'settings:get': () => getPublicSettings(),
   'settings:save': async (input) => {
     const r = await saveSettings(input)
@@ -328,7 +330,7 @@ function createWindow(): void {
 for (const f of [wikiAreaBeforeReady, filesAreaBeforeReady, chatAreaBeforeReady, shellAreaBeforeReady]) f()
 
 app.whenReady().then(() => {
-  for (const f of [wikiAreaSetup, filesAreaSetup, chatAreaSetup, shellAreaSetup]) f(ctx)
+  for (const f of [wikiAreaSetup, filesAreaSetup, chatAreaSetup, shellAreaSetup, receiptsAreaSetup]) f(ctx)
   // 개발 실행에서도 Dock 에 RAKM 아이콘이 보이게 한다 (패키징하면 electron-builder 가 build/icon.png 를 쓴다)
   if (process.platform === 'darwin' && !app.isPackaged) {
     const icon = nativeImage.createFromPath(ICON_PATH)

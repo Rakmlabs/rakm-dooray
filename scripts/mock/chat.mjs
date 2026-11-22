@@ -44,7 +44,8 @@ let seeded = false
 function seed(state) {
   if (seeded) return
   seeded = true
-  const { logs, log, ME, members } = state
+  const { logs, log, members } = state
+  const ME = state.BASE_ME ?? state.ME
   members['m-design'] = '이디자'
   const min = 60_000
   const extra = [

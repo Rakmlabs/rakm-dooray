@@ -18,7 +18,8 @@ const ARRIVE_MS = Number(process.env.SHELL_MOCK_ARRIVE_MS ?? 45_000)
 function init(state) {
   if (ready) return
   ready = true
-  const { members, channels, logs, log, iso, ME } = state
+  const { members, channels, logs, log, iso } = state
+  const ME = state.BASE_ME ?? state.ME
   Object.assign(members, { 'm-design': '이디자인', 'm-ops': '최운영', 'm-sales': '정영업' })
   channels.push(
     { id: 'c-beta', title: '베타 결제 모듈', type: 'private', members: [ME, 'm-dev'], updatedAt: iso(1_800_000) },

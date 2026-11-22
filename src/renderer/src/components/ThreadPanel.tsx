@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Message } from '@shared/types'
 import { call, errorText } from '../api'
 import { useChannelLogs } from '../lib/hooks'
+import { useReportSeen } from '../lib/receipts'
 import { parseTopic } from '../lib/projects'
 import { renderMarkdown } from '../lib/markdown'
 import { formatTime } from '../lib/format'
@@ -25,7 +26,18 @@ export interface OpenThread {
 }
 
 /** 스레드는 두레이에서 별도 채널이다. 스레드 채널 ID 로 logs 를 읽고, 같은 ID 로 보내면 스레드에 이어진다. */
-export function ThreadPanel({ thread, meId, onClose }: { thread: OpenThread; meId: string | null; onClose: () => void }) {
+export function ThreadPanel({
+  thread,
+  meId,
+  onClose,
+  visible = true
+}: {
+  thread: OpenThread
+  meId: string | null
+  onClose: () => void
+  /** 메신저 화면이 보일 때만 읽은 위치를 알린다 */
+  visible?: boolean
+}) {
   const { toast } = useApp()
   const nameOf = useMemberNames()
   // "스레드로 답하기"로 연 경우 첫 답글을 보내면 생기는 스레드 채널 ID
@@ -33,6 +45,7 @@ export function ThreadPanel({ thread, meId, onClose }: { thread: OpenThread; meI
   useEffect(() => setCreatedId(null), [thread])
   const threadId = thread.threadChannelId || createdId
   const { messages, error, reload, loadMore, canLoadMore } = useChannelLogs(threadId || null, true, 100)
+  useReportSeen(threadId || null, messages, visible)
   const topic = parseTopic(thread.root?.text ?? thread.title ?? '')
   const rich = useRichContentClicks(meId)
   const pending = !threadId && !!thread.startFrom && !!thread.root

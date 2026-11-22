@@ -623,6 +623,18 @@ hr {
   font-size: 11.5px;
   color: var(--muted);
 }
+/* 읽음 확인: 내 메시지를 아직 읽지 않은 사람 수 (읽으면 사라진다) */
+.receipt-unread {
+  position: absolute;
+  right: 14px;
+  bottom: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: #e0a100;
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
 .msg-body {
   overflow-wrap: anywhere;
 }
@@ -1349,4 +1361,11 @@ hr {
   * {
     transition: none !important;
   }
+}
+
+.receipts-where {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
 }
