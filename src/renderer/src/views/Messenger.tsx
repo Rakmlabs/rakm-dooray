@@ -696,7 +696,7 @@ function ChannelPane({
   const [mode, setMode] = useState<ComposeMode>({ kind: 'normal' })
   const [newTopic, setNewTopic] = useState(false)
   const [gallery, setGallery] = useState(false)
-  const { messages, error, reload, loadMore, canLoadMore, ensure } = useChannelLogs(channel.id, active, 100)
+  const { messages, loading, error, reload, loadMore, canLoadMore, ensure } = useChannelLogs(channel.id, active, 100)
   // 읽음 확인: 대화 탭이 실제로 보일 때만 읽은 위치를 알린다
   useReportSeen(channel.id, messages, active && tab === 'chat')
   const threads = useMemo(() => collectThreads(messages), [messages])
@@ -837,6 +837,7 @@ function ChannelPane({
             onLoadMore={loadMore}
             highlightId={focusMessageId}
             readMarkerAt={marker}
+            loading={loading}
           />
           <Composer
             placeholder={`${title}에 메시지 보내기`}

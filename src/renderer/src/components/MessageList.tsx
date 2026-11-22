@@ -40,6 +40,8 @@ interface Props {
   parentChannelId?: string | null
   /** 목록 오른쪽 위 북마크 진입 버튼 (기본: 스레드 밖에서만 보임) */
   showBookmarksEntry?: boolean
+  /** 처음 불러오는 중이면 메시지 자리 표시(스켈레톤) */
+  loading?: boolean
 }
 
 const NO_IDS: string[] = []
@@ -110,18 +112,62 @@ export function MessageList(props: Props) {
   const bookmarks = useBookmarks()
   const bookmarked = useMemo(() => new Set(bookmarks.list.map((b) => b.key)), [bookmarks.list])
 
-  // 새 메시지가 오면, 사용자가 맨 아래를 보고 있을 때만 따라 내려간다
+  const inner = useRef<HTMLDivElement>(null)
+  const lastId = useRef<string | null>(null)
+  /** 위로 올려 보는 동안 아래에 새로 온 남의 메시지 수 */
+  const [unseen, setUnseen] = useState(0)
+  /** 맨 아래에서 꽤 떨어져 있음 → "최근 메시지로" 버튼 */
+  const [farFromBottom, setFarFromBottom] = useState(false)
+
+  // 새 메시지가 오면, 사용자가 맨 아래를 보고 있을 때만 따라 내려간다. 내가 보낸 것이면 항상 내려간다 (슬랙과 같음)
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
-    if (stickToBottom.current || lastCount.current === 0) el.scrollTop = el.scrollHeight
+    const last = messages[messages.length - 1]
+    const appended = !!last && last.id !== lastId.current && lastCount.current > 0
+    const mineNew = appended && !!meId && last.senderId === meId
+    if (stickToBottom.current || lastCount.current === 0 || mineNew) {
+      el.scrollTop = el.scrollHeight
+      stickToBottom.current = true
+      setUnseen(0)
+    } else if (appended) {
+      const prev = lastId.current ? messages.findIndex((m) => m.id === lastId.current) : -1
+      const added = prev >= 0 ? messages.slice(prev + 1).filter((m) => m.senderId !== meId).length : 1
+      if (added > 0) setUnseen((n) => n + added)
+    }
     lastCount.current = messages.length
-  }, [messages])
+    lastId.current = last?.id ?? null
+  }, [messages, meId])
+
+  // 입력창이 자라거나 이미지·미리보기 카드가 늦게 그려져 높이가 바뀌어도, 맨 아래를 보고 있었다면 맨 아래에 붙어 있게
+  useEffect(() => {
+    const el = scroller.current
+    const box = inner.current
+    if (!el || !box || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight
+    })
+    ro.observe(el)
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [])
 
   const onScroll = () => {
     const el = scroller.current
     if (!el) return
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+    stickToBottom.current = gap < 80
+    if (stickToBottom.current && unseen) setUnseen(0)
+    const far = gap > 600
+    if (far !== farFromBottom) setFarFromBottom(far)
+  }
+
+  const toBottom = () => {
+    const el = scroller.current
+    if (!el) return
+    stickToBottom.current = true
+    setUnseen(0)
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }
 
   // 빈 입력창에서 ↑ → 내 마지막 메시지 수정
@@ -180,11 +226,31 @@ export function MessageList(props: Props) {
           </button>
         </div>
       )}
+      <div className="msgs-inner" ref={inner}>
       {props.canLoadMore && (
         <button className="load-more" onClick={props.onLoadMore}>
           이전 메시지 더 보기
         </button>
       )}
+      {messages.length === 0 &&
+        (props.loading ? (
+          <div className="msg-skeletons" aria-label="메시지를 불러오는 중" aria-busy="true">
+            {[72, 46, 88, 58, 66].map((w, i) => (
+              <div key={i} className="msg-skel">
+                <span className="skel skel-avatar" />
+                <span className="skel-lines">
+                  <span className="skel skel-name" />
+                  <span className="skel skel-line" style={{ width: `${w}%` }} />
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="msgs-empty">
+            <b>{inThread ? '아직 답글이 없습니다' : '아직 메시지가 없습니다'}</b>
+            <span>{inThread ? '아래 입력창에 첫 답글을 남겨 보세요.' : '첫 메시지를 보내 대화를 시작해 보세요.'}</span>
+          </div>
+        ))}
       {!props.canLoadMore && messages.length > 0 && messages.length >= 1000 && (
         <div className="muted center small">이 컴퓨터에 받아 둔 기록은 여기까지입니다.</div>
       )}
@@ -239,6 +305,15 @@ export function MessageList(props: Props) {
           </div>
         )
       })}
+      </div>
+      {(unseen > 0 || farFromBottom) && (
+        <div className="jump-latest-wrap">
+          <button className={`jump-latest ${unseen > 0 ? 'has-new' : ''}`} onClick={toBottom}>
+            {unseen > 0 ? `새 메시지 ${unseen > 99 ? '99+' : unseen}개` : '최근 메시지로'}
+            <ChatIcon name="arrowDown" size={14} />
+          </button>
+        </div>
+      )}
       {rich.node}
       {wikiSend && <WikiSendDialog messages={[wikiSend]} onClose={() => setWikiSend(null)} />}
       {bookmarksOpen && (

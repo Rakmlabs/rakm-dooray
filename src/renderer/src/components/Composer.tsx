@@ -58,12 +58,16 @@ function saveDraft(key: string, d: Draft): void {
   }
 }
 
-const PREVIEW_KEY = 'rakm.chat.codePreview'
+// 기본은 끔 (0.1.6 까지는 켬이 기본이라 키를 바꿨다)
+/** 입력창 최대 높이. 넘치면 안에서 스크롤 */
+const MAX_INPUT_PX = 240
+
+const PREVIEW_KEY = 'rakm.chat.codePreview.v2'
 function loadPreviewPref(): boolean {
   try {
-    return window.localStorage.getItem(PREVIEW_KEY) !== '0'
+    return window.localStorage.getItem(PREVIEW_KEY) === '1'
   } catch {
-    return true
+    return false
   }
 }
 function savePreviewPref(on: boolean): void {
@@ -144,7 +148,8 @@ export function Composer({
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(200, el.scrollHeight)}px`
+    el.style.height = `${Math.min(MAX_INPUT_PX, el.scrollHeight)}px`
+    el.style.overflowY = el.scrollHeight > MAX_INPUT_PX ? 'auto' : 'hidden'
   }, [text])
 
   // 임시 저장 (조금 모아서)
@@ -316,16 +321,11 @@ export function Composer({
       {showPreview && (
         <div className="composer-preview md" aria-label="보낼 메시지 미리보기" dangerouslySetInnerHTML={{ __html: renderMarkdown(closeOpenFence(text)) }} />
       )}
-      <div className="composer-row">
-        {onAttach && (
-          <button className="icon-btn" title="파일 첨부" aria-label="파일 첨부" onClick={() => void onAttach()} disabled={disabled}>
-            <Icon name="clip" />
-          </button>
-        )}
+      <div className={`composer-box ${disabled ? 'disabled' : ''}`}>
         <textarea
           ref={ref}
           rows={1}
-          className={inFence ? 'in-code' : undefined}
+          className={`composer-input ${inFence ? 'in-code' : ''}`}
           spellCheck={!inFence}
           value={text}
           placeholder={placeholder}
@@ -404,20 +404,26 @@ export function Composer({
             }
           }}
         />
-        <div className="composer-tools">
-          <button className="icon-btn" title="인라인 코드 (⌘⇧C)" aria-label="인라인 코드" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('inline')}>
-            <ChatIcon name="code" size={17} />
+        <div className="composer-bar" role="toolbar" aria-label="입력 도구">
+          {onAttach && (
+            <button className="icon-btn tip" data-tip="파일 첨부 (끌어 놓기·붙여넣기도 됩니다)" aria-label="파일 첨부" onClick={() => void onAttach()} disabled={disabled}>
+              <Icon name="clip" size={16} />
+            </button>
+          )}
+          {onAttach && <span className="composer-tools-sep" aria-hidden />}
+          <button className="icon-btn tip" data-tip="인라인 코드 ⌘⇧C" aria-label="인라인 코드" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('inline')}>
+            <ChatIcon name="code" size={16} />
           </button>
-          <button className="icon-btn" title="코드 블록 (⌘⌥C)" aria-label="코드 블록" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('block')}>
-            <ChatIcon name="codeBlock" size={17} />
+          <button className="icon-btn tip" data-tip="코드 블록 ⌘⌥C · ```js 처럼 언어를 적으면 색이 입혀집니다" aria-label="코드 블록" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('block')}>
+            <ChatIcon name="codeBlock" size={16} />
           </button>
-          <button className="icon-btn" title="링크 (⌘⇧U)" aria-label="링크" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('link')}>
-            <ChatIcon name="link" size={17} />
+          <button className="icon-btn tip" data-tip="링크 ⌘⇧U" aria-label="링크" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('link')}>
+            <ChatIcon name="link" size={16} />
           </button>
           <span className="composer-tools-sep" aria-hidden />
           <button
-            className="icon-btn"
-            title="사람 멘션 (@)"
+            className="icon-btn tip"
+            data-tip="사람 멘션 @"
             aria-label="사람 멘션"
             disabled={disabled}
             onClick={() => {
@@ -428,49 +434,43 @@ export function Composer({
               setMenuClosedAt(null)
             }}
           >
-            <ChatIcon name="at" size={17} />
+            <ChatIcon name="at" size={16} />
           </button>
           <button
-            className="icon-btn emoji-toggle"
-            title="이모지"
+            className="icon-btn tip emoji-toggle"
+            data-tip="이모지"
             aria-label="이모지"
             aria-expanded={emojiOpen}
             disabled={disabled}
             onClick={() => setEmojiOpen((v) => !v)}
           >
-            <ChatIcon name="smile" size={17} />
+            <ChatIcon name="smile" size={16} />
           </button>
-          <button className="icon-btn" title="위키 페이지 링크 넣기" aria-label="위키 페이지 링크 넣기" disabled={disabled} onClick={() => setWikiOpen(true)}>
-            <ChatIcon name="wiki" size={17} />
+          <button className="icon-btn tip" data-tip="위키 페이지 링크 넣기" aria-label="위키 페이지 링크 넣기" disabled={disabled} onClick={() => setWikiOpen(true)}>
+            <ChatIcon name="wiki" size={16} />
           </button>
-        </div>
-        <button className="send-btn" onClick={() => void submit()} disabled={disabled || sending || !text.trim()} aria-label="보내기" title="보내기 (Enter)">
-          <Icon name="send" />
-        </button>
-      </div>
-      {(inFence || showPreview || /```|`/.test(text)) && (
-        <div className="composer-hint muted small">
-          {inFence ? (
-            <span>
-              코드 블록 작성 중 · <kbd>Enter</kbd> 줄바꿈 · <kbd>Tab</kbd> 들여쓰기 · <kbd>⌘Enter</kbd> 보내기 (닫는 ``` 는 자동으로 붙습니다)
-            </span>
-          ) : (
-            <span>
-              <kbd>⌘⇧C</kbd> 인라인 코드 · <kbd>⌘⌥C</kbd> 코드 블록 · <code>```js</code> 처럼 언어를 적으면 색이 입혀집니다
-            </span>
-          )}
+          <span className="composer-status" aria-live="polite">
+            {inFence ? '코드 블록 · Enter 줄바꿈 · Tab 들여쓰기 · ⌘Enter 보내기' : ''}
+          </span>
           <button
-            className="link-btn"
+            className={`icon-btn tip tip-right ${previewOn ? 'on' : ''}`}
+            data-tip={previewOn ? '코드 미리보기 끄기' : '코드 미리보기 켜기 (코드가 있을 때 입력창 위에 보낼 모양을 띄웁니다)'}
+            aria-label="코드 미리보기"
+            aria-pressed={previewOn}
+            disabled={disabled}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
-              setPreviewOn((v) => !v)
+              setPreviewOn(!previewOn)
               savePreviewPref(!previewOn)
             }}
           >
-            {previewOn ? '미리보기 끄기' : '미리보기 켜기'}
+            <ChatIcon name="eye" size={16} />
+          </button>
+          <button className="send-btn tip tip-right" data-tip="보내기 Enter · 줄바꿈 Shift+Enter" onClick={() => void submit()} disabled={disabled || sending || !text.trim()} aria-label="보내기">
+            <Icon name="send" size={15} />
           </button>
         </div>
-      )}
+      </div>
       {wikiOpen && (
         <WikiLinkDialog
           onClose={() => setWikiOpen(false)}

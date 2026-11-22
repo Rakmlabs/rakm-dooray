@@ -15,7 +15,9 @@ const PATHS = {
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M20 20l-4-4',
   code: 'M9 7l-5 5 5 5 M15 7l5 5-5 5',
   codeBlock: 'M4 4h16v16H4z M10 9.5L7.5 12l2.5 2.5 M14 9.5l2.5 2.5-2.5 2.5',
-  more: 'M5 12h.01 M12 12h.01 M19 12h.01'
+  more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  arrowDown: 'M12 5v14 M6 13l6 6 6-6'
 } as const
 
 export type ChatIconName = keyof typeof PATHS

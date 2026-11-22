@@ -47,7 +47,7 @@ export function ThreadPanel({
   const [createdId, setCreatedId] = useState<string | null>(null)
   useEffect(() => setCreatedId(null), [thread])
   const threadId = thread.threadChannelId || createdId
-  const { messages, error, reload, loadMore, canLoadMore } = useChannelLogs(threadId || null, true, 100)
+  const { messages, loading, error, reload, loadMore, canLoadMore } = useChannelLogs(threadId || null, true, 100)
   useReportSeen(threadId || null, messages, visible)
   const topic = parseTopic(thread.root?.text ?? thread.title ?? '')
   const rich = useRichContentClicks(meId)
@@ -142,6 +142,7 @@ export function ThreadPanel({
           onChanged={() => void reload()}
           canLoadMore={canLoadMore}
           onLoadMore={loadMore}
+          loading={loading}
         />
       )}
       <Composer
