@@ -13,6 +13,8 @@ import { FileAttachment } from './files/FileAttachment'
 import { Avatar } from './people/Avatar'
 import { useProfileCard } from './people/ProfileCard'
 import { ChatIcon } from './chat/ChatIcon'
+import { closeOpenFence, insideCodeFence } from './chat/composerText'
+import { ThreadDeleteDialog, threadDeleteMessage } from './chat/threadActions'
 import { LinkPreviewCard } from './chat/LinkPreviewCard'
 import { BookmarksPanel } from './chat/BookmarksPanel'
 import { WikiSendDialog } from './chat/WikiSendDialog'
@@ -330,7 +332,7 @@ function MessageItem({
     if (!draft.trim() || draft === m.text) return setEditing(false)
     setBusy(true)
     try {
-      await call('messenger:update', m.channelId, m.id, draft)
+      await call('messenger:update', m.channelId, m.id, closeOpenFence(draft))
       setEditing(false)
       onChanged()
     } catch (e) {
@@ -340,7 +342,11 @@ function MessageItem({
     }
   }
 
+  const [deletingThread, setDeletingThread] = useState(false)
+
   async function remove() {
+    // 스레드가 달린 메시지: 스레드 안 내 답글까지 같이 지울지 묻는 창으로
+    if (m.thread && !inThread) return setDeletingThread(true)
     if (!window.confirm('이 메시지를 삭제할까요? 되돌릴 수 없습니다.')) return
     try {
       await call('messenger:delete', m.channelId, m.id)
@@ -396,6 +402,7 @@ function MessageItem({
           <div className="msg-edit">
             <textarea
               value={draft}
+              className={/```/.test(draft) ? 'has-code' : undefined}
               autoFocus
               onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
               onChange={(e) => setDraft(e.target.value)}
@@ -405,6 +412,8 @@ function MessageItem({
                   setEditing(false)
                 }
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  // 코드 블록 안에서는 줄바꿈 (⌘Enter 는 저장)
+                  if (!e.metaKey && !e.ctrlKey && insideCodeFence(draft, e.currentTarget.selectionStart ?? draft.length)) return
                   e.preventDefault()
                   void saveEdit()
                 }
@@ -417,7 +426,7 @@ function MessageItem({
               <button className="small" onClick={() => setEditing(false)}>
                 취소
               </button>
-              <span className="muted small">Enter 저장 · Esc 취소</span>
+              <span className="muted small">Enter 저장 · Esc 취소 · 코드 블록 안에서는 ⌘Enter 저장</span>
             </div>
           </div>
         ) : deleted ? (
@@ -444,6 +453,19 @@ function MessageItem({
         >
           {unreadIds.length}
         </span>
+      )}
+      {deletingThread && m.thread && (
+        <ThreadDeleteDialog
+          target={{ threadChannelId: m.thread.channelId, parentChannelId: m.channelId, root: m }}
+          meId={m.senderId}
+          title={topic?.title ?? ''}
+          onClose={() => setDeletingThread(false)}
+          onDone={(r) => {
+            setDeletingThread(false)
+            toast(threadDeleteMessage(r), r.failed ? 'error' : 'info')
+            onChanged()
+          }}
+        />
       )}
       {!editing && !deleted && (
         <div className="msg-actions" role="toolbar" aria-label="메시지 동작">

@@ -30,7 +30,18 @@ function nameFor(file: File, pasted: boolean): string {
   return file.name || '파일'
 }
 
-export function FileDropArea({ channelId, onUploaded, children }: { channelId: string; onUploaded: () => void; children: ReactNode }) {
+export function FileDropArea({
+  channelId,
+  onUploaded,
+  children,
+  disabled
+}: {
+  channelId: string
+  onUploaded: () => void
+  children: ReactNode
+  /** 아직 올릴 곳이 없을 때 (첫 답글 전의 스레드) */
+  disabled?: boolean
+}) {
   const [items, setItems] = useState<Pending[]>([])
   const [over, setOver] = useState(false)
   const depth = useRef(0)
@@ -52,7 +63,7 @@ export function FileDropArea({ channelId, onUploaded, children }: { channelId: s
   // 방을 옮기면 올리려던 목록은 버린다
   useEffect(() => () => setItems([]), [channelId])
 
-  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files')
+  const hasFiles = (e: React.DragEvent) => !disabled && Array.from(e.dataTransfer.types).includes('Files')
 
   return (
     <div
@@ -82,7 +93,7 @@ export function FileDropArea({ channelId, onUploaded, children }: { channelId: s
       }}
       onPaste={(e) => {
         const files = Array.from(e.clipboardData.files)
-        if (files.length === 0) return // 글자 붙여넣기는 그대로
+        if (files.length === 0 || disabled) return // 글자 붙여넣기는 그대로
         e.preventDefault()
         add(files, true)
       }}

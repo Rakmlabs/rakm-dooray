@@ -36,6 +36,7 @@ const logs = {
     log('c-general', 'm-co', '[알파] 3월 릴리스 일정', 7_000_000, { thread: { channelId: 't-alpha', totalCount: '2', lastUpdatedAt: now - 600_000 } }),
     log('c-general', 'm-dev', '[베타] 결제 모듈 버그', 5_000_000, { thread: { channelId: 't-beta', totalCount: '1', lastUpdatedAt: now - 1_200_000 } }),
     log('c-general', 'm-dev', '점심 뭐 드실래요?', 300_000),
+    log('c-general', 'm-dev', '배포 전에 `npm run typecheck` 먼저 돌려 주세요. 검사 스크립트는 이렇게 바꿨어요\n```ts\nexport async function preflight(env: Env): Promise<void> {\n  const missing = REQUIRED.filter((k) => !env[k])\n  if (missing.length) throw new Error(`빠진 값: ${missing.join(\', \')}`)\n  await run(\'npm\', [\'test\'])\n}\n```', 240_000),
     { ...log('c-general', 'm-co', '', 120_000), type: 'FILE', file: { id: 'f1', name: '사업계획서_v3.pdf', fileSize: 1_234_567 } },
     { ...log('c-general', ME, '{"type":0,"text":"확인했습니다 **감사합니다**"}', 60_000), type: 'REPLY' }
   ],

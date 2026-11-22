@@ -12,7 +12,10 @@ const PATHS = {
   page: 'M6 3h9l4 4v14H6z M14 3v5h5',
   chevron: 'M9 6l6 6-6 6',
   check: 'M5 12l5 5 9-10',
-  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M20 20l-4-4'
+  search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M20 20l-4-4',
+  code: 'M9 7l-5 5 5 5 M15 7l5 5-5 5',
+  codeBlock: 'M4 4h16v16H4z M10 9.5L7.5 12l2.5 2.5 M14 9.5l2.5 2.5-2.5 2.5',
+  more: 'M5 12h.01 M12 12h.01 M19 12h.01'
 } as const
 
 export type ChatIconName = keyof typeof PATHS

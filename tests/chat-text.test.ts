@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { firstPreviewUrl, highlightCode, mentionMarkup, parseWikiUrl, replaceMentions, wikiPageUrl } from '../src/renderer/src/lib/markdown'
-import { activeMention, applyMentions, insideCodeFence } from '../src/renderer/src/components/chat/composerText'
+import { activeMention, applyFormat, applyMentions, autoCloseFence, closeOpenFence, indentCode, insideCodeFence } from '../src/renderer/src/components/chat/composerText'
 import { appendToContent, messageToWikiBlock } from '../src/renderer/src/components/chat/wikiText'
 import { initialsOf, avatarTone } from '../src/renderer/src/components/people/Avatar'
 import { toProfile } from '../src/main/chat/profile'
@@ -94,5 +94,41 @@ describe('아바타·프로필', () => {
   it('공식 멤버 상세 응답 → 프로필', () => {
     const p = toProfile('x', { id: '1', name: '김', externalEmailAddress: 'a@b.c', userCode: 'kim', englishName: '', defaultOrganization: { id: 99 } })
     expect(p).toEqual({ id: '1', name: '김', email: 'a@b.c', userCode: 'kim', englishName: null, nickname: null, organizationId: '99' })
+  })
+})
+
+describe('코드 서식 넣기', () => {
+  it('인라인 코드: 선택을 감싸고, 이미 감싼 것은 벗긴다', () => {
+    expect(applyFormat('run npm i now', 4, 9, 'inline')).toEqual({ text: 'run `npm i` now', selStart: 5, selEnd: 10 })
+    expect(applyFormat('run `npm i` now', 5, 10, 'inline')).toEqual({ text: 'run npm i now', selStart: 4, selEnd: 9 })
+    expect(applyFormat('ab', 1, 1, 'inline')).toEqual({ text: 'a``b', selStart: 2, selEnd: 2 })
+  })
+  it('여러 줄 선택은 코드 블록으로, ``` 는 각자 한 줄에', () => {
+    const r = applyFormat('보세요 a\nb 끝', 4, 7, 'inline')
+    expect(r.text).toBe('보세요 \n```\na\nb\n``` 끝'.replace('``` 끝', '```\n 끝'))
+    const e = applyFormat('', 0, 0, 'block')
+    expect(e.text).toBe('```\n\n```')
+    expect(e.selStart).toBe(4)
+  })
+  it('링크', () => {
+    expect(applyFormat('문서', 0, 2, 'link').text).toBe('[문서](https://)')
+    expect(applyFormat('https://a.com', 0, 13, 'link')).toEqual({ text: '[](https://a.com)', selStart: 1, selEnd: 1 })
+  })
+  it('```언어 줄에서 Enter 면 닫는 ``` 를 미리 넣는다', () => {
+    expect(autoCloseFence('```js', 5)).toEqual({ text: '```js\n\n```', selStart: 6, selEnd: 6 })
+    expect(autoCloseFence('hi\n```', 6)?.text).toBe('hi\n```\n\n```')
+    // 닫는 줄이거나, 뒤에 이미 닫는 ``` 가 있거나, 평범한 줄이면 하지 않음
+    expect(autoCloseFence('```\na\n```', 9)).toBeNull()
+    expect(autoCloseFence('```\n\n```', 3)).toBeNull()
+    expect(autoCloseFence('그냥', 2)).toBeNull()
+  })
+  it('코드 블록 안 Tab 들여쓰기/내어쓰기', () => {
+    expect(indentCode('```\nab\n```', 5, 5, false).text).toBe('```\na  b\n```')
+    expect(indentCode('```\na\nb\n```', 4, 7, false).text).toBe('```\n  a\n  b\n```')
+    expect(indentCode('```\n  a\n  b\n```', 6, 11, true).text).toBe('```\na\nb\n```')
+  })
+  it('닫지 않은 코드 블록은 보낼 때 닫는다', () => {
+    expect(closeOpenFence('```js\nconst a = 1')).toBe('```js\nconst a = 1\n```')
+    expect(closeOpenFence('```\na\n```')).toBe('```\na\n```')
   })
 })

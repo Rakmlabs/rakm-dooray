@@ -30,6 +30,8 @@ import { FileGallery } from '../components/files/FileGallery'
 import { Composer } from '../components/Composer'
 import { ThreadPanel, type OpenThread } from '../components/ThreadPanel'
 import { rememberReply } from '../components/chat/chatStore'
+import { ChatIcon } from '../components/chat/ChatIcon'
+import { ThreadDeleteDialog, ThreadMenu, setThreadHidden, threadDeleteMessage, useHiddenThreads } from '../components/chat/threadActions'
 import { Modal } from '../components/Modal'
 import { Icon } from '../components/Icon'
 import { Avatar } from '../components/people/Avatar'
@@ -421,6 +423,7 @@ export function MessengerView({ active }: { active: boolean }) {
             onOpenChannel={openChannel}
             onNewTopic={() => setDialog({ kind: 'projectTopic', projectId: selection.id })}
             nameOf={nameOf}
+            meId={me?.id ?? null}
           />
         )}
         {!selection && (
@@ -847,6 +850,8 @@ function ChannelPane({
           activeId={openThreadId}
           onOpen={(t) => open(t.root)}
           nameOf={nameOf}
+          meId={me?.id ?? null}
+          onChanged={() => void reload()}
           note="이 대화방의 최근 메시지에 달린 스레드입니다."
         />
       )}
@@ -876,8 +881,12 @@ function ThreadList({
   onOpen,
   nameOf,
   note,
-  showChannel
+  showChannel,
+  meId,
+  onChanged
 }: {
+  meId: string | null
+  onChanged?: () => void
   threads: ThreadEntry[]
   projects: ProjectGroup[]
   defaultProject: ProjectGroup | null
@@ -893,12 +902,19 @@ function ThreadList({
     return [...set.values()]
   }, [threads])
   const [tag, setTag] = useState<string | null>(null)
-  const shown = tag === null ? threads : tag === '' ? threads.filter((t) => !t.topic.project) : threads.filter((t) => sameProject(t.topic.project, tag))
+  const { toast } = useApp()
+  const hiddenSet = useHiddenThreads()
+  const [showHidden, setShowHidden] = useState(false)
+  const [menu, setMenu] = useState<{ t: ThreadEntry; x: number; y: number } | null>(null)
+  const [deleting, setDeleting] = useState<ThreadEntry | null>(null)
+  const hiddenCount = threads.filter((t) => hiddenSet.has(t.thread.channelId)).length
+  const visible = showHidden ? threads.filter((t) => hiddenSet.has(t.thread.channelId)) : threads.filter((t) => !hiddenSet.has(t.thread.channelId))
+  const shown = tag === null ? visible : tag === '' ? visible.filter((t) => !t.topic.project) : visible.filter((t) => sameProject(t.topic.project, tag))
   const colorOf = (name: string | null) => projects.find((p) => sameProject(p.name, name))?.color
 
   return (
     <div className="thread-list">
-      {(tags.length > 0 || note) && (
+      {(tags.length > 0 || note || hiddenCount > 0) && (
         <div className="chips">
           <button className={tag === null ? 'chip active' : 'chip'} onClick={() => setTag(null)}>
             전체 {threads.length}
@@ -914,17 +930,30 @@ function ThreadList({
               주제 없음
             </button>
           )}
+          {(hiddenCount > 0 || showHidden) && (
+            <button className={showHidden ? 'chip active' : 'chip'} onClick={() => setShowHidden((v) => !v)} title="목록에서 숨긴 스레드 (이 컴퓨터에만 저장)">
+              숨긴 스레드 {hiddenCount}
+            </button>
+          )}
         </div>
       )}
       {note && <div className="muted small pad">{note}</div>}
       {shown.length === 0 && (
         <div className="empty small">
-          <p>스레드가 없습니다.</p>
+          <p>{showHidden ? '숨긴 스레드가 없습니다.' : '스레드가 없습니다.'}</p>
           <p className="muted">“새 주제”로 {defaultProject ? `[${defaultProject.name}] ` : ''}주제 스레드를 열어 보세요.</p>
         </div>
       )}
       {shown.map((t) => (
-        <button key={t.thread.channelId} className={`thread-row ${activeId === t.thread.channelId ? 'active' : ''}`} onClick={() => onOpen(t)}>
+        <div
+          key={t.thread.channelId}
+          className={`thread-row-wrap ${hiddenSet.has(t.thread.channelId) ? 'hidden-thread' : ''}`}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            setMenu({ t, x: e.clientX, y: e.clientY })
+          }}
+        >
+        <button className={`thread-row ${activeId === t.thread.channelId ? 'active' : ''}`} onClick={() => onOpen(t)}>
           <div className="thread-row-top">
             {t.topic.project && (
               <span className="tag" style={{ borderColor: colorOf(t.topic.project), color: colorOf(t.topic.project) }}>
@@ -938,7 +967,49 @@ function ThreadList({
             {nameOf(t.root.senderId) ?? '…'} · 답글 {t.thread.totalCount}개 · {formatTime(threadTime(t))}
           </div>
         </button>
+          <button
+            className="thread-row-more"
+            title="스레드 메뉴 (우클릭)"
+            aria-label="스레드 메뉴"
+            aria-haspopup="menu"
+            aria-expanded={menu?.t === t}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setMenu({ t, x: r.right - 180, y: r.bottom + 4 })
+            }}
+          >
+            <ChatIcon name="more" size={16} />
+          </button>
+        </div>
       ))}
+      {menu && (
+        <ThreadMenu
+          x={menu.x}
+          y={menu.y}
+          hidden={hiddenSet.has(menu.t.thread.channelId)}
+          onOpen={() => onOpen(menu.t)}
+          onToggleHidden={() => {
+            const on = !hiddenSet.has(menu.t.thread.channelId)
+            setThreadHidden(menu.t.thread.channelId, on)
+            toast(on ? '스레드를 목록에서 숨겼습니다. "숨긴 스레드"에서 다시 볼 수 있습니다.' : '숨김을 해제했습니다.', 'info')
+          }}
+          onDelete={() => setDeleting(menu.t)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {deleting && (
+        <ThreadDeleteDialog
+          target={{ threadChannelId: deleting.thread.channelId, parentChannelId: deleting.parentChannelId, root: deleting.root }}
+          meId={meId}
+          title={deleting.topic.title}
+          onClose={() => setDeleting(null)}
+          onDone={(r) => {
+            setDeleting(null)
+            toast(threadDeleteMessage(r), r.failed ? 'error' : 'info')
+            onChanged?.()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -951,8 +1022,10 @@ function ProjectPane({
   onOpenThread,
   onOpenChannel,
   onNewTopic,
-  nameOf
+  nameOf,
+  meId
 }: {
+  meId: string | null
   project: ProjectGroup | null
   channels: Channel[]
   onOpenThread: (t: OpenThread) => void
@@ -1039,6 +1112,8 @@ function ProjectPane({
           defaultProject={project}
           activeId={null}
           nameOf={nameOf}
+          meId={meId}
+          onChanged={() => void scan(scope)}
           showChannel={titleOf}
           note={
             scope === 'project'

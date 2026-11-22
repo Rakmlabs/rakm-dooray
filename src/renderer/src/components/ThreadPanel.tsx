@@ -11,6 +11,9 @@ import { MessageList, useRichContentClicks } from './MessageList'
 import { Composer } from './Composer'
 import { Icon } from './Icon'
 import { Avatar } from './people/Avatar'
+import { ChatIcon } from './chat/ChatIcon'
+import { FileDropArea } from './files/FileDropArea'
+import { ThreadDeleteDialog, ThreadMenu, setThreadHidden, threadDeleteMessage, useHiddenThreads } from './chat/threadActions'
 
 export interface OpenThread {
   threadChannelId: string
@@ -49,6 +52,9 @@ export function ThreadPanel({
   const topic = parseTopic(thread.root?.text ?? thread.title ?? '')
   const rich = useRichContentClicks(meId)
   const pending = !threadId && !!thread.startFrom && !!thread.root
+  const hiddenSet = useHiddenThreads()
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   return (
     <aside className="thread-col" aria-label="스레드">
@@ -60,6 +66,21 @@ export function ThreadPanel({
         {!pending && (
           <button className="icon-btn" onClick={() => void reload()} title="새로고침" aria-label="새로고침">
             <Icon name="refresh" size={16} />
+          </button>
+        )}
+        {threadId && (
+          <button
+            className="icon-btn"
+            title="스레드 메뉴 (숨기기·삭제)"
+            aria-label="스레드 메뉴"
+            aria-haspopup="menu"
+            aria-expanded={!!menu}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect()
+              setMenu({ x: r.right - 180, y: r.bottom + 4 })
+            }}
+          >
+            <ChatIcon name="more" size={16} />
           </button>
         )}
         <button className="icon-btn" onClick={onClose} title="닫기 (Esc)" aria-label="스레드 닫기">
@@ -80,6 +101,34 @@ export function ThreadPanel({
         </div>
       )}
       {error && <div className="banner banner-err">{error}</div>}
+      {menu && threadId && (
+        <ThreadMenu
+          x={menu.x}
+          y={menu.y}
+          hidden={hiddenSet.has(threadId)}
+          onToggleHidden={() => {
+            const on = !hiddenSet.has(threadId)
+            setThreadHidden(threadId, on)
+            toast(on ? '스레드를 목록에서 숨겼습니다. 스레드 탭의 "숨긴 스레드"에서 다시 볼 수 있습니다.' : '숨김을 해제했습니다.', 'info')
+          }}
+          onDelete={() => setDeleting(true)}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {deleting && threadId && (
+        <ThreadDeleteDialog
+          target={{ threadChannelId: threadId, parentChannelId: thread.parentChannelId, root: thread.root }}
+          meId={meId}
+          title={topic.title}
+          onClose={() => setDeleting(false)}
+          onDone={(r) => {
+            setDeleting(false)
+            toast(threadDeleteMessage(r), r.failed ? 'error' : 'info')
+            if (r.deleted > 0 || r.hidden) onClose()
+          }}
+        />
+      )}
+      <FileDropArea channelId={threadId || `pending:${thread.root?.id ?? ''}`} onUploaded={() => void reload()} disabled={!threadId}>
       {pending ? (
         <div className="messages thread-pending">
           <div className="muted small center pad">첫 답글을 보내면 이 메시지에 스레드가 만들어집니다.</div>
@@ -132,6 +181,7 @@ export function ThreadPanel({
             : undefined
         }
       />
+      </FileDropArea>
     </aside>
   )
 }

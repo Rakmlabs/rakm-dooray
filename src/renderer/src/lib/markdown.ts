@@ -43,6 +43,29 @@ DOMPurify.addHook?.('afterSanitizeAttributes', (node) => {
   }
 })
 
+// 코드 블록 복사 버튼: 렌더된 HTML 은 dangerouslySetInnerHTML 로 들어가므로 문서 한 곳에서 클릭을 받는다
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', (e) => {
+    const btn = (e.target as Element | null)?.closest?.('.code-copy')
+    if (!(btn instanceof HTMLElement)) return
+    e.preventDefault()
+    e.stopPropagation()
+    const code = btn.parentElement?.querySelector('pre code')?.textContent ?? ''
+    const done = (ok: boolean) => {
+      btn.textContent = ok ? '복사됨' : '복사 실패'
+      btn.classList.toggle('done', ok)
+      window.setTimeout(() => {
+        btn.textContent = '복사'
+        btn.classList.remove('done')
+      }, 1500)
+    }
+    void navigator.clipboard.writeText(code).then(
+      () => done(true),
+      () => done(false)
+    )
+  })
+}
+
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 }
@@ -70,7 +93,8 @@ const md = new Marked({
     code({ text, lang }: Tokens.Code) {
       const { html, language } = highlightCode(text, lang)
       const label = language ? ` data-lang="${escapeHtml(language)}"` : ''
-      return `<pre class="code-block"${label}><code class="hljs">${html}</code></pre>\n`
+      // 복사 버튼은 아래 문서 전체 클릭 처리기가 받는다 (메신저·스레드·미리보기 어디서 그려져도 동작)
+      return `<div class="code-wrap"><button type="button" class="code-copy" aria-label="코드 복사">복사</button><pre class="code-block"${label}><code class="hljs">${html}</code></pre></div>\n`
     }
   }
 })

@@ -8,7 +8,8 @@ import { ChatIcon } from './chat/ChatIcon'
 import { EmojiPicker } from './chat/EmojiPicker'
 import { WikiLinkDialog } from './chat/WikiLinkDialog'
 import { useOrganizationId, useProfile } from './chat/chatStore'
-import { activeMention, applyMentions, insideCodeFence } from './chat/composerText'
+import { activeMention, applyFormat, applyMentions, autoCloseFence, closeOpenFence, indentCode, insideCodeFence, type Edit, type FormatKind } from './chat/composerText'
+import { renderMarkdown } from '../lib/markdown'
 import { EDIT_LAST_EVENT, type EditLastDetail } from './MessageList'
 
 interface Props {
@@ -57,6 +58,22 @@ function saveDraft(key: string, d: Draft): void {
   }
 }
 
+const PREVIEW_KEY = 'rakm.chat.codePreview'
+function loadPreviewPref(): boolean {
+  try {
+    return window.localStorage.getItem(PREVIEW_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+function savePreviewPref(on: boolean): void {
+  try {
+    window.localStorage.setItem(PREVIEW_KEY, on ? '1' : '0')
+  } catch {
+    /* 무시 */
+  }
+}
+
 // ---------- 멘션 ----------
 
 const channelParticipants = new Map<string, Promise<string[]>>()
@@ -72,6 +89,16 @@ function participantsOf(channelId: string): Promise<string[]> {
     channelParticipants.set(channelId, p)
   }
   return p
+}
+
+/** 서식 단축키 (두레이 웹 메신저와 같은 키): ⌘⇧C 인라인 코드, ⌘⌥C 코드 블록, ⌘⇧U 링크 */
+export function formatShortcut(e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; code: string }): FormatKind | null {
+  const mod = e.metaKey || e.ctrlKey
+  if (!mod) return null
+  if (e.code === 'KeyC' && e.altKey && !e.shiftKey) return 'block'
+  if (e.code === 'KeyC' && e.shiftKey && !e.altKey) return 'inline'
+  if (e.code === 'KeyU' && e.shiftKey && !e.altKey) return 'link'
+  return null
 }
 
 /** Enter 전송, Shift+Enter 줄바꿈 (코드 블록 안에서는 Enter 도 줄바꿈, ⌘/Ctrl+Enter 는 항상 전송). 한글 조합 중 Enter 는 무시한다. */
@@ -100,6 +127,7 @@ export function Composer({
   const [menuClosedAt, setMenuClosedAt] = useState<number | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [wikiOpen, setWikiOpen] = useState(false)
+  const [previewOn, setPreviewOn] = useState(() => loadPreviewPref())
   const [searchResults, setSearchResults] = useState<Member[]>([])
   const [participants, setParticipants] = useState<string[]>([])
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -197,6 +225,23 @@ export function Composer({
     insertAt(mention.start, caret, `@${c.name} `, { ...state.mentions, [c.name]: c.id })
   }
 
+  function applyEdit(ed: Edit) {
+    const el = ref.current
+    setText(ed.text)
+    setCaret(ed.selEnd)
+    requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(ed.selStart, ed.selEnd)
+    })
+  }
+
+  function format(kind: FormatKind) {
+    const el = ref.current
+    const start = el?.selectionStart ?? text.length
+    const end = el?.selectionEnd ?? text.length
+    applyEdit(applyFormat(text, start, end, kind))
+  }
+
   function insertAtCaret(s: string) {
     const el = ref.current
     const start = el?.selectionStart ?? text.length
@@ -210,7 +255,7 @@ export function Composer({
     setSending(true)
     try {
       // 실제로 남아 있는 @이름 만 멘션으로 바꾼다
-      await onSend(applyMentions(t, state.mentions, organizationId))
+      await onSend(applyMentions(closeOpenFence(t), state.mentions, organizationId))
       setState({ key, text: '', mentions: {} })
       saveDraft(key, { text: '', mentions: {} })
     } catch {
@@ -222,6 +267,8 @@ export function Composer({
   }
 
   const syncCaret = () => setCaret(ref.current?.selectionStart ?? 0)
+  const inFence = insideCodeFence(text, caret)
+  const showPreview = previewOn && /```|`[^`\n]+`/.test(text)
 
   return (
     <div className="composer" ref={rootRef}>
@@ -266,6 +313,9 @@ export function Composer({
           onClose={() => setEmojiOpen(false)}
         />
       )}
+      {showPreview && (
+        <div className="composer-preview md" aria-label="보낼 메시지 미리보기" dangerouslySetInnerHTML={{ __html: renderMarkdown(closeOpenFence(text)) }} />
+      )}
       <div className="composer-row">
         {onAttach && (
           <button className="icon-btn" title="파일 첨부" aria-label="파일 첨부" onClick={() => void onAttach()} disabled={disabled}>
@@ -275,6 +325,8 @@ export function Composer({
         <textarea
           ref={ref}
           rows={1}
+          className={inFence ? 'in-code' : undefined}
+          spellCheck={!inFence}
           value={text}
           placeholder={placeholder}
           disabled={disabled}
@@ -305,6 +357,21 @@ export function Composer({
                 return
               }
             }
+            const fmt = formatShortcut(e)
+            if (fmt) {
+              e.preventDefault()
+              format(fmt)
+              return
+            }
+            if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+              const el = e.currentTarget
+              const s0 = el.selectionStart ?? 0
+              if (insideCodeFence(text, s0)) {
+                e.preventDefault()
+                applyEdit(indentCode(text, s0, el.selectionEnd ?? s0, e.shiftKey))
+                return
+              }
+            }
             if (e.key === 'Escape') {
               if (emojiOpen) return setEmojiOpen(false)
               if (onCancelBanner) onCancelBanner()
@@ -322,8 +389,15 @@ export function Composer({
                 void submit()
                 return
               }
-              if (e.shiftKey) return
               const pos = e.currentTarget.selectionStart ?? text.length
+              const closed = pos === (e.currentTarget.selectionEnd ?? pos) ? autoCloseFence(text, pos) : null
+              if (closed) {
+                // ```언어 줄에서 Enter: 닫는 ``` 를 미리 넣는다
+                e.preventDefault()
+                applyEdit(closed)
+                return
+              }
+              if (e.shiftKey) return
               if (insideCodeFence(text, pos)) return // 코드 블록 안: 줄바꿈
               e.preventDefault()
               void submit()
@@ -331,6 +405,16 @@ export function Composer({
           }}
         />
         <div className="composer-tools">
+          <button className="icon-btn" title="인라인 코드 (⌘⇧C)" aria-label="인라인 코드" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('inline')}>
+            <ChatIcon name="code" size={17} />
+          </button>
+          <button className="icon-btn" title="코드 블록 (⌘⌥C)" aria-label="코드 블록" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('block')}>
+            <ChatIcon name="codeBlock" size={17} />
+          </button>
+          <button className="icon-btn" title="링크 (⌘⇧U)" aria-label="링크" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('link')}>
+            <ChatIcon name="link" size={17} />
+          </button>
+          <span className="composer-tools-sep" aria-hidden />
           <button
             className="icon-btn"
             title="사람 멘션 (@)"
@@ -364,6 +448,29 @@ export function Composer({
           <Icon name="send" />
         </button>
       </div>
+      {(inFence || showPreview || /```|`/.test(text)) && (
+        <div className="composer-hint muted small">
+          {inFence ? (
+            <span>
+              코드 블록 작성 중 · <kbd>Enter</kbd> 줄바꿈 · <kbd>Tab</kbd> 들여쓰기 · <kbd>⌘Enter</kbd> 보내기 (닫는 ``` 는 자동으로 붙습니다)
+            </span>
+          ) : (
+            <span>
+              <kbd>⌘⇧C</kbd> 인라인 코드 · <kbd>⌘⌥C</kbd> 코드 블록 · <code>```js</code> 처럼 언어를 적으면 색이 입혀집니다
+            </span>
+          )}
+          <button
+            className="link-btn"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setPreviewOn((v) => !v)
+              savePreviewPref(!previewOn)
+            }}
+          >
+            {previewOn ? '미리보기 끄기' : '미리보기 켜기'}
+          </button>
+        </div>
+      )}
       {wikiOpen && (
         <WikiLinkDialog
           onClose={() => setWikiOpen(false)}
