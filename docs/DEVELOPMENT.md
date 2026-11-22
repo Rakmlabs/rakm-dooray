@@ -60,7 +60,7 @@ DOORAY_MOCK_BASE=http://127.0.0.1:8787 npm run dev   # 메신저·위키가 가�
 CI 는 없다. 이 Mac 에서 `npm run release` 한 줄로 만들고, GitHub 릴리스에 올린다.
 
 `npm run release` (`scripts/release.mjs`) 가 하는 일:
-1. 타입 검사, 단위 테스트, `electron-vite build` (시험 빌드 표시 `RAKM_TEST_BUILD` 는 지우고 빌드한다)
+1. 타입 검사, 단위 테스트, 알림 권한 모듈 빌드(`scripts/build-native.mjs`), `electron-vite build` (시험 빌드 표시 `RAKM_TEST_BUILD` 는 지우고 빌드한다)
 2. `electron-builder --mac --arm64`: Developer ID 로 서명(hardened runtime, `build/entitlements.mac.plist`), `.app` 공증·staple, dmg·zip 생성
 3. dmg 도 공증하고 staple
 4. **자동 업데이트 정보 `latest-mac.yml`** 을 최종 zip·dmg 로 계산해 만든다 (sha512·크기)
@@ -106,6 +106,10 @@ gh release create v0.2.0 release/RAKM-Dooray-0.2.0-arm64.dmg release/RAKM-Dooray
 
 ### 시험 빌드 (알림 권한·자동 업데이트 확인용)
 
+`--variant N` 을 주면 번들 ID·이름·userData 에 N 이 붙는다 (`kr.co.rakm.dooray.testN`). macOS 는 번들 ID 마다 권한 창을 한 번만 띄우므로,
+"처음 권한을 묻는" 흐름을 다시 시험할 때는 새 variant 로 만든다. 업그레이드 경로 시험은 같은 variant 로 이전 버전(태그의 코드)과 새 버전을 만들어
+이전 버전을 설치·실행한 뒤 로컬 피드로 새 버전을 받게 한다.
+
 알림 권한과 자동 업데이트는 **서명된 패키징 앱**에서만 실제처럼 동작한다 (개발 실행은 서명 안 된 `Electron.app` 이라 macOS 가 알림을 막는다).
 실제 앱과 섞이지 않는 시험 빌드를 만든다:
 
@@ -119,6 +123,20 @@ node scripts/test-build.mjs --version 0.0.2 --out /tmp/tb/v2 --mock http://127.0
 - 서명은 하고 공증은 안 한다. **`~/Applications` 처럼 정식 앱 폴더에 두고 `open` 으로 연다** — 임시 폴더(`/tmp`)에 둔 앱은 macOS 가 알림 권한 요청을 거절한다.
 - 업데이트 흐름: `node scripts/mock-dooray.mjs` (PORT=8790) 와 아무 정적 서버로 `/feed/` 에 v2 의 `latest-mac.yml`·zip 을 두고, v1 을 켜면
   확인 → 받기 → "준비됨" 띠 → 재시작 → 0.0.2 로 다시 켜진다.
+
+### 알림 권한 모듈 (`native/notify.mm`)
+
+Electron 에는 알림 권한을 조회·요청하는 API 가 없고, `Notification` 의 `show` 이벤트는 권한이 없어도 온다.
+그래서 UNUserNotificationCenter 를 직접 부르는 작은 Node-API 모듈을 둔다 (`settings()` 실제 상태, `request()` 권한 요청).
+
+- `npm run build`·`dev`·`dist`·`release`·`test-build` 가 먼저 `scripts/build-native.mjs` 로 `build/native/notify.node` 를 만든다 (clang, Xcode 필요).
+  패키징 때 `Contents/Resources/native/notify.node` 로 들어가고 앱과 같은 Developer ID 로 서명된다 (release 가 서명을 검증한다).
+- 앱을 켤 때마다 상태를 읽고, 허용이 아니면 바로 요청한다 (이미 고른 경우 macOS 는 창을 띄우지 않는다). 그 뒤 주기적으로·창이 앞에 올 때 다시 읽는다.
+- macOS 26 은 한 번도 답하지 않은 앱도 `denied` 로 알려 준다 → "미결정"과 "거부"를 구분하지 않고 같은 안내(시스템 설정 열기)를 띄운다.
+- 권한이 없으면 macOS 는 Dock 배지도 그리지 않는다 (`app.setBadgeCount` 는 값만 넣는다. `lsappinfo` 의 StatusLabel 에는 보여도 Dock 에는 안 보인다).
+  권한이 생기면 배지를 다시 넣는다. 실제로 보이는지는 Dock 접근성 값으로 확인한다:
+  `osascript -e 'tell application "System Events" to tell process "Dock" to get value of attribute "AXStatusLabel" of UI element "RAKM Dooray" of list 1'`
+- `com.apple.ncprefs` 에는 사용자가 답한 앱만 있다. 항목이 없다고 "권한을 요청한 적 없음"은 아니다.
 
 ## 구조
 

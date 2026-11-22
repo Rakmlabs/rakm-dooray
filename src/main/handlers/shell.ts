@@ -1,4 +1,5 @@
 // 앱 전역 편의: ⌘K, 폴더, 안 읽음·알림, 로컬 보관·검색, 창·트레이 영역의 main 핸들러. 이 영역 작업자만 고친다.
+import { app } from 'electron'
 import type { Message } from '@shared/types'
 import type { ShellAreaContract } from '@shared/ipc-shell'
 import type { ShellState } from '@shared/types-shell'
@@ -91,7 +92,7 @@ export function shellAreaHandlers(_ctx: MainContext): HandlersFor<ShellAreaContr
       return null
     },
     'shell:testNotification': async () => need().testNotification(),
-    'shell:notifyPermission': async () => permission().get(),
+    'shell:notifyPermission': async () => permission().refresh(),
     'shell:openNotificationSettings': async () => {
       permission().openSettings()
       return null
@@ -105,7 +106,10 @@ export function shellAreaBeforeReady(): void {}
 
 /** app ready 후, 창을 만들기 전에 한 번 (예: protocol.handle, 트레이). */
 export function shellAreaSetup(ctx: MainContext): void {
-  tracker = new NotifyPermissionTracker((p) => ctx.emit('shell:notifyPermission', p))
+  tracker = new NotifyPermissionTracker(
+    (p) => ctx.emit('shell:notifyPermission', p),
+    () => service?.reapplyBadge()
+  )
   service = new ShellService({
     permission: tracker,
     messenger: ctx.messenger,
@@ -119,4 +123,8 @@ export function shellAreaSetup(ctx: MainContext): void {
     onStateApplied: (s) => shellHooks.applyState(s)
   })
   service.start()
+  // 앱을 켤 때마다 알림 권한을 읽고, 아직 결정 안 했으면 바로 묻는다 (토큰 저장 여부와 무관)
+  tracker.start()
+  // 시스템 설정에서 바꾸고 돌아오면 바로 반영
+  app.on('browser-window-focus', () => tracker?.refresh())
 }

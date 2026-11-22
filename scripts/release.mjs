@@ -51,6 +51,7 @@ console.log(canNotarize ? '공증: API 키 사용' : '공증 건너뜀: 자격 �
 
 run('npx', ['tsc', '--noEmit', '-p', 'tsconfig.json'])
 run('npx', ['vitest', 'run'])
+run('node', ['scripts/build-native.mjs'])
 run('npx', ['electron-vite', 'build'])
 
 // electron-builder 이름 규칙으로 공증 자격을 넣는다 (electron-builder 의 APPLE_API_KEY 는 .p8 경로, APPLE_API_KEY_ID 는 키 ID)
@@ -103,7 +104,9 @@ for (const [name, cmd, args] of [
   ['stapler (dmg)', 'xcrun', ['stapler', 'validate', join(OUT, dmg)]],
   ['codesign (zip 안 app)', 'codesign', ['--verify', '--deep', '--strict', zipApp]],
   ['spctl (zip 안 app)', 'spctl', ['-a', '-vv', zipApp]],
-  ['stapler (zip 안 app)', 'xcrun', ['stapler', 'validate', zipApp]]
+  ['stapler (zip 안 app)', 'xcrun', ['stapler', 'validate', zipApp]],
+  // 알림 권한 모듈: 없거나 서명이 안 맞으면 앱이 권한 상태를 못 읽는다
+  ['codesign (zip 안 notify.node)', 'codesign', ['--verify', '--strict', join(zipApp, 'Contents', 'Resources', 'native', 'notify.node')]]
 ]) {
   const r = quiet(cmd, args)
   if (!r.ok && (canNotarize || !/spctl|stapler/.test(name))) verifyFailed = true

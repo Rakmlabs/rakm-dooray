@@ -1,3 +1,4 @@
+import { parseSystem, systemText } from '@shared/system-message'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { Message } from '@shared/types'
 import type { ReplyRef } from '@shared/types-chat'
@@ -190,7 +191,7 @@ export function MessageList(props: Props) {
         const showDay = !!day && day !== lastDay
         const showMarker = m.id === markerId
         const t = m.sentAt ? Date.parse(m.sentAt) : 0
-        const system = !!m.senderType && m.senderType !== 'member' && m.senderType !== 'app'
+        const system = (!!m.senderType && m.senderType !== 'member' && m.senderType !== 'app') || !!parseSystem(m)
         const grouped =
           !showDay && !showMarker && !system && !lastHadThread && lastSender === m.senderId && t - lastTime < GROUP_GAP_MS && t >= lastTime && m.type !== 'REPLY'
         lastDay = day || lastDay
@@ -356,7 +357,8 @@ function MessageItem({
   }
 
   if (system) {
-    return <div className="msg-system">{m.text}</div>
+    const sys = parseSystem(m)
+    return <div className="msg-system">{sys ? systemText(sys, nameOf) : m.text}</div>
   }
 
   const profileBtn = (el: Element) => m.senderId && !isApp && onOpenProfile(m.senderId, el)

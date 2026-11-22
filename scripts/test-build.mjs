@@ -1,5 +1,6 @@
 // 시험용 패키징 빌드: 알림 권한·자동 업데이트처럼 "서명된 패키징 앱"에서만 확인되는 것을 실제 앱과 섞이지 않게 시험한다.
-//   node scripts/test-build.mjs --version 0.0.1 --out <폴더> [--mock http://127.0.0.1:8790] [--feed http://127.0.0.1:8791/]
+//   node scripts/test-build.mjs --version 0.0.1 --out <폴더> [--mock http://127.0.0.1:8790] [--feed http://127.0.0.1:8791/] [--variant 2]
+//   --variant N: 번들 ID·이름·userData 에 N 을 붙인다 (알림 권한을 "아직 결정 안 함"부터 다시 시험할 때. macOS 는 번들 ID 마다 권한을 기억한다)
 //
 // 실제 앱과 다른 점 (소유자의 /Applications 앱·토큰·데이터·알림 권한을 건드리지 않게):
 //   - 번들 ID kr.co.rakm.dooray.test, 이름 "RAKM Dooray Test" / 표시 이름 "RAKM 두레이 시험"
@@ -23,10 +24,16 @@ if (!version || !out) {
   process.exit(1)
 }
 
-const NAME = 'RAKM Dooray Test'
+const variant = arg('variant', '')
+if (!/^[0-9a-z]*$/.test(variant)) {
+  console.error('--variant 는 영문 소문자·숫자만')
+  process.exit(1)
+}
+const NAME = `RAKM Dooray Test${variant}`
+const DISPLAY = `RAKM 두레이 시험${variant}`
 const flags = {
-  name: 'RAKM 두레이 시험',
-  userData: 'dooray-client-test',
+  name: DISPLAY,
+  userData: `dooray-client-test${variant}`,
   mockBase: arg('mock'),
   updateFeed: arg('feed')
 }
@@ -48,6 +55,7 @@ try {
   process.exit(1)
 }
 
+run('node', ['scripts/build-native.mjs'])
 run('npx', ['electron-vite', 'build'], { ...process.env, RAKM_TEST_BUILD: JSON.stringify(flags) })
 rmSync(out, { recursive: true, force: true })
 run(
@@ -60,12 +68,12 @@ run(
     '--publish',
     'never',
     `-c.directories.output=${out}`,
-    '-c.appId=kr.co.rakm.dooray.test',
+    `-c.appId=kr.co.rakm.dooray.test${variant}`,
     `-c.productName=${NAME}`,
     `-c.extraMetadata.version=${version}`,
-    '-c.mac.extendInfo.CFBundleDisplayName=RAKM 두레이 시험',
+    `-c.mac.extendInfo.CFBundleDisplayName=${DISPLAY}`,
     '-c.mac.notarize=false',
-    `-c.artifactName=RAKM-Dooray-Test-\${version}-\${arch}.\${ext}`
+    `-c.artifactName=RAKM-Dooray-Test${variant}-\${version}-\${arch}.\${ext}`
   ],
   env
 )

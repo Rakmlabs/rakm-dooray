@@ -39,14 +39,20 @@ function init(state) {
     log('t-refund', ME, '1차는 전체 환불만', 1_600_000),
     log('t-refund', 'm-dev', '넵 정리해서 위키에 올릴게요', 900_000)
   ]
+  // 두레이 시스템 메시지 (type=SYSTEM, 보낸 사람 없음, 본문이 JSON). 실제 응답과 같은 모양
+  const sys = (channelId, kind, body, msAgo) => ({ ...log(channelId, ME, JSON.stringify({ type: kind, [kind]: body }), msAgo), type: 'SYSTEM', sender: null })
   logs['c-design'] = [
+    sys('c-design', 'createChannel', { host: 'm-design', title: '디자인 리뷰' }, 12_000_000),
+    sys('c-design', 'joinMember', { host: 'm-design', members: [ME, 'm-co'] }, 11_900_000),
     log('c-design', 'm-design', '로그인 화면 시안 올렸어요', 11_000_000),
     log('c-design', 'm-co', '버튼 색을 브랜드 블루로 맞춰 주세요', 10_800_000)
   ]
   logs['c-ops'] = [log('c-ops', 'm-ops', '서버 점검 공지: 토요일 02:00~04:00', 86_400_000)]
   logs['c-random'] = [
     log('c-random', 'm-design', '오늘 점심 김치찌개 어때요', 14_500_000),
-    log('c-random', 'm-co', '좋아요', 14_400_000)
+    log('c-random', 'm-co', '좋아요', 14_400_000),
+    sys('c-random', 'somethingNew', { x: 1 }, 14_350_000),
+    sys('c-random', 'joinMember', { host: 'm-sales', members: ['m-sales'] }, 14_300_000)
   ]
   logs['c-dm2'] = [log('c-dm2', 'm-dev', '배포 스크립트 리뷰 부탁드려요', 5_400_000)]
   // 1500개 기록: 30일 전부터 25분 간격

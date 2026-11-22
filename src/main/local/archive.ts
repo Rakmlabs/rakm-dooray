@@ -1,3 +1,4 @@
+import { parseSystem, systemText } from '@shared/system-message'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import type { Message } from '@shared/types'
 import type { ChannelSummary, MessageHit, WikiHit, WikiIndexEntry } from '@shared/types-shell'
@@ -103,6 +104,7 @@ export class LocalArchive {
     this.db = new DatabaseSync(path)
     this.db.exec('pragma journal_mode = wal; pragma synchronous = normal;')
     this.db.exec(SCHEMA)
+    this.fixSystemText()
     const p = (sql: string) => this.db.prepare(sql)
     this.st = {
       get: p('select data from messages where channel_id = ? and id = ?'),
@@ -169,10 +171,10 @@ export class LocalArchive {
         const data = JSON.stringify(m)
         const row = this.st.get.get(channelId, m.id) as { data: string } | undefined
         if (!row) {
-          this.st.insert.run(channelId, m.id, m.seq, ms(m.sentAt), m.senderId, m.text, data)
+          this.st.insert.run(channelId, m.id, m.seq, ms(m.sentAt), m.senderId, searchable(m), data)
           result.added.push(m)
         } else if (row.data !== data) {
-          this.st.update.run(m.seq, ms(m.sentAt), m.senderId, m.text, data, channelId, m.id)
+          this.st.update.run(m.seq, ms(m.sentAt), m.senderId, searchable(m), data, channelId, m.id)
           result.changed++
         }
         if (m.thread) this.st.thread.run(m.thread.channelId, channelId, m.id)
@@ -235,6 +237,21 @@ export class LocalArchive {
     return !!r?.backfilled
   }
 
+  /** 0.1.3 까지는 시스템 메시지 원문 JSON 이 검색 본문에 들어갔다. 문구로 바꿔 둔다 (몇 개뿐이라 열 때마다 확인해도 싸다) */
+  private fixSystemText(): void {
+    try {
+      const rows = this.db.prepare(`select channel_id, id, data from messages where sender_id is null and text like '{"type":"%'`).all() as {
+        channel_id: string
+        id: string
+        data: string
+      }[]
+      const upd = this.db.prepare('update messages set text = ? where channel_id = ? and id = ?')
+      for (const r of rows) upd.run(searchable(JSON.parse(r.data) as Message), r.channel_id, r.id)
+    } catch {
+      /* 검색 본문만의 문제라 실패해도 넘어간다 */
+    }
+  }
+
   setBackfilled(channelId: string): void {
     this.st.setBackfilled.run(channelId)
   }
@@ -248,6 +265,7 @@ export class LocalArchive {
       unread,
       lastAt: last?.sentAt ?? null,
       lastText: last ? previewText(last) : '',
+      lastSystem: last ? parseSystem(last) : null,
       lastSenderId: last?.senderId ?? null,
       readAt: read === null ? null : new Date(read).toISOString()
     }
@@ -372,9 +390,17 @@ export class LocalArchive {
 /** 목록 미리보기용 한 줄 */
 export function previewText(m: Message): string {
   if (m.flags === 'DELETED_ROOT') return '(삭제된 메시지)'
+  const sys = parseSystem(m)
+  if (sys) return systemText(sys)
   if (m.type === 'FILE' && m.file) return `[파일] ${m.file.name}`
   const t = stripMarkdown(m.text).replace(/\s+/g, ' ').trim()
   return t.length > 80 ? t.slice(0, 80) + '…' : t
+}
+
+/** 검색 색인에 넣을 본문: 시스템 메시지는 원문 JSON 대신 문구 */
+function searchable(m: Message): string {
+  const sys = parseSystem(m)
+  return sys ? systemText(sys) : m.text
 }
 
 /** 미리보기·알림용으로 마크다운 기호만 걷어 낸다 */

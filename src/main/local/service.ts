@@ -140,8 +140,6 @@ export class ShellService {
     try {
       this.me = await this.deps.messenger.me()
       this.memberCache.set(this.me.id, this.me)
-      // 토큰이 확인됐다: 아직 알림 권한을 물은 적이 없으면 지금 묻는다 (안 읽은 메시지가 생길 때까지 기다리지 않는다)
-      if (this.state.prefs.notify.enabled) this.deps.permission.askOnce()
     } catch {
       return null
     }
@@ -292,6 +290,13 @@ export class ShellService {
       app.setBadgeCount(p.total)
       this.onUnread?.(p.total)
     }, 250)
+  }
+
+  /** 알림(배지) 권한이 새로 생겼을 때: macOS 는 권한이 없을 때 넣은 배지를 그리지 않으므로 다시 넣는다 */
+  reapplyBadge(): void {
+    const total = this.summaries().total
+    app.setBadgeCount(0)
+    app.setBadgeCount(total)
   }
 
   /** 트레이 제목 갱신용 */

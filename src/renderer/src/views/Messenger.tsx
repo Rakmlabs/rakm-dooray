@@ -1,3 +1,4 @@
+import { systemText } from '@shared/system-message'
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import type { Channel, Member, Message, ProjectGroup } from '@shared/types'
 import type { ChannelSummary } from '@shared/types-shell'
@@ -549,7 +550,9 @@ function ChannelRow({
     setMenu(false)
   }
 
-  const preview = summary?.lastText
+  const preview = summary?.lastSystem
+    ? systemText(summary.lastSystem, nameOf)
+    : summary?.lastText
     ? (channel.type !== 'direct' && summary.lastSenderId ? `${nameOf(summary.lastSenderId) ?? '…'}: ` : '') + summary.lastText
     : ''
   const has = unread > 0

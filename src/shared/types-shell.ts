@@ -1,4 +1,5 @@
 // 셸 영역(⌘K, 대화방 폴더, 안 읽음·알림, 로컬 보관·검색, 창·트레이)이 main 과 renderer 사이에 주고받는 타입.
+import type { SystemEvent } from './system-message'
 import type { Channel, Member, Message } from './types'
 
 export type ThemePref = 'system' | 'light' | 'dark'
@@ -62,6 +63,8 @@ export interface ChannelSummary {
   unread: number
   lastAt: string | null
   lastText: string
+  /** 마지막 메시지가 시스템 메시지면 그 내용 (화면에서 이름을 붙여 다시 쓴다) */
+  lastSystem?: SystemEvent | null
   lastSenderId: string | null
   /** 마지막으로 읽은 시각 (ISO) */
   readAt: string | null
@@ -139,12 +142,25 @@ export interface ConnectionState {
  * - denied: 시스템이 거절했다 (시스템 설정 > 알림에서 꺼져 있음)
  * - unsupported: 이 실행에서는 알림을 쓸 수 없다 (서명 안 된 개발 실행 등)
  */
-export type NotifyPermissionState = 'unknown' | 'asked' | 'allowed' | 'denied' | 'unsupported'
+/**
+ * macOS 알림 권한 (UNUserNotificationCenter 의 실제 상태를 앱 프로세스 안에서 읽는다).
+ * - undecided: 아직 허용·거부를 고르지 않음 → 앱이 시작할 때 권한 창을 띄운다
+ * - allowed: 허용됨 (배너·배지는 각각 꺼져 있을 수 있다 → banners, badge)
+ * - denied: 거부됨·꺼짐 → 시스템 설정에서 켜야 한다
+ * - unknown: 읽지 못함 (네이티브 모듈 없음 등)
+ * - unsupported: 알림을 쓸 수 없음 (개발 실행 포함)
+ */
+export type NotifyPermissionState = 'undecided' | 'allowed' | 'denied' | 'unknown' | 'unsupported'
 
 export interface NotifyPermission {
   state: NotifyPermissionState
+  /** 화면에 보일 짧은 설명 (문제가 없으면 '') */
   detail: string
-  /** 마지막으로 알림을 보내 본 시각 */
+  /** 배너(알림 창)가 켜져 있는지 */
+  banners: boolean
+  /** Dock 배지가 켜져 있는지. macOS 는 알림 권한이 없으면 Dock 배지도 그리지 않는다 */
+  badge: boolean
+  /** 마지막으로 상태를 읽은 시각 */
   checkedAt: string | null
   /** 개발 실행(서명 안 된 Electron)이라 결과가 실제 앱과 다를 수 있음 */
   dev: boolean
