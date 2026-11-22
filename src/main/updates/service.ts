@@ -160,7 +160,7 @@ export class UpdateService {
     this.log('error', msg(e))
     // 이미 받아 둔 것은 그대로 쓸 수 있다
     if (this.status.state === 'ready') return
-    this.done(`확인 실패: ${short(msg(e))}`)
+    this.done(`확인 실패: ${friendly(msg(e))}`)
     this.set({ state: 'error', percent: null, restarting: false, detail: '다음 확인 때 다시 시도합니다.' })
   }
 
@@ -194,4 +194,12 @@ export class UpdateService {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
-const short = (s: string) => (s.length > 120 ? s.slice(0, 117) + '…' : s)
+/** 설정 화면에 보일 짧은 사유 (원문은 updates.log 에) */
+export function friendly(m: string): string {
+  if (/\b404\b/.test(m)) return '릴리스를 찾지 못했습니다 (404). 저장소가 비공개이거나 아직 릴리스가 없습니다.'
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|ECONNRESET|net::ERR_/i.test(m)) return '업데이트 서버에 연결할 수 없습니다.'
+  if (/sha512|checksum/i.test(m)) return '받은 파일이 손상돼 버렸습니다. 다음 확인 때 다시 받습니다.'
+  if (/signature|code ?sign|designated requirement/i.test(m)) return '새 버전의 서명이 맞지 않아 설치하지 않았습니다.'
+  const first = m.split('\n')[0].replace(/^Error:\s*/, '')
+  return first.length > 100 ? first.slice(0, 97) + '…' : first
+}
