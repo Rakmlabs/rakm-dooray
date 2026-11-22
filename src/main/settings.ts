@@ -18,7 +18,7 @@ export const DOORAY_DOMAIN = 'rakm.dooray.com'
 export const DOORAY_API_BASE = 'https://api.dooray.com'
 
 interface StoredSettings {
-  dooray: { apiBase: string; domain: string; pollSeconds: number }
+  dooray: { apiBase: string; domain: string }
   mail: {
     address: string
     displayName: string
@@ -32,7 +32,7 @@ interface StoredSettings {
 type SecretKey = 'doorayToken' | 'mailPassword'
 
 const DEFAULTS: StoredSettings = {
-  dooray: { apiBase: DOORAY_API_BASE, domain: DOORAY_DOMAIN, pollSeconds: 4 },
+  dooray: { apiBase: DOORAY_API_BASE, domain: DOORAY_DOMAIN },
   mail: {
     address: '',
     displayName: '',
@@ -105,6 +105,8 @@ function loadStored(): StoredSettings {
   // 예전 버전에서 저장한 도메인·API 주소가 남아 있어도 무시하고 고정값을 쓴다
   s.dooray.apiBase = DOORAY_API_BASE
   s.dooray.domain = DOORAY_DOMAIN
+  // 새로고침 간격은 이제 코드에 고정이다 (src/renderer/src/lib/hooks.ts). 예전에 저장한 값은 무시한다.
+  delete (s.dooray as { pollSeconds?: unknown }).pollSeconds
   // 저장된 값이 없을 때만 개발용 .env 로 채운다
   if (!raw.mail?.address && env.MAIL_ADDRESS) s.mail.address = env.MAIL_ADDRESS
   if (!raw.mail?.imapHost && env.MAIL_IMAP_HOST) s.mail.imapHost = env.MAIL_IMAP_HOST
@@ -187,8 +189,8 @@ export async function saveSettings(input: SettingsInput): Promise<PublicSettings
     mail: { ...DEFAULTS.mail, ...(current.mail ?? {}) }
   }
   if (input.dooray) {
-    const { token, pollSeconds } = input.dooray
-    if (pollSeconds !== undefined) next.dooray.pollSeconds = Math.min(60, Math.max(2, Math.round(pollSeconds)))
+    delete (next.dooray as { pollSeconds?: unknown }).pollSeconds
+    const { token } = input.dooray
     if (token !== undefined && token !== null) {
       const t = token.trim()
       // 붙여 넣다 한글·공백이 섞이면 저장하지 않는다 (그대로 두면 모든 호출이 ByteString 오류로 실패한다)

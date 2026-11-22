@@ -17,6 +17,45 @@ export function useInterval(fn: () => void, ms: number, active: boolean): void {
 }
 
 /**
+ * 열린 대화방·스레드를 다시 읽는 간격 (설정에서 바꾸지 않는다).
+ * - 창이 앞에 있을 때 3초: 요청 하나가 GET .../logs 한 번이라 열린 방 0.33회/초, 스레드를 같이 열어도 0.67회/초.
+ *   뒤에서 안 읽음을 훑는 것(15초마다 3~4방 + 채널 목록 25초)을 더해도 1회/초 안쪽이다.
+ *   두레이 요청 제한은 1초마다 토큰이 차는 토큰 버킷(수치 비공개)이라, 초당 1회 안쪽이면 걸리지 않는 것으로 봤다.
+ *   남은 토큰이 바닥나면 main 의 http.ts 가 1초 쉬고 보내고, 429 를 받으면 물러났다 다시 시도한다.
+ * - 창이 보이지만 다른 앱이 앞에 있으면 10초, 창이 숨겨지거나 최소화되면 멈춘다 (안 읽음·알림은 main 이 따로 훑는다).
+ * - 실시간 연결(Socket Mode)이 되어 있으면 놓친 것을 위한 15초.
+ */
+export const POLL_FOCUSED_MS = 3_000
+export const POLL_BACKGROUND_MS = 10_000
+export const POLL_REALTIME_MS = 15_000
+
+/** 창 상태에 맞춰 fn 을 부른다: 앞에 있으면 fastMs, 보이기만 하면 slowMs, 숨겨지면 쉰다. 창이 다시 앞에 오면 바로 한 번. */
+export function usePolling(fn: () => void, fastMs: number, slowMs: number, active: boolean): void {
+  const ref = useRef(fn)
+  ref.current = fn
+  useEffect(() => {
+    if (!active) return
+    let last = Date.now()
+    const run = () => {
+      last = Date.now()
+      ref.current()
+    }
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - last >= (document.hasFocus() ? fastMs : slowMs) - 50) run()
+    }, fastMs)
+    const onFocus = () => {
+      if (Date.now() - last > fastMs) run()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(id)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [fastMs, slowMs, active])
+}
+
+/**
  * 대화방(또는 스레드 채널) 메시지. 두레이에는 메시지 조회용 공식 API 가 없어
  * 비공식 GET .../logs?size=N (최신 N개, 최대 1000) 을 쓴다. 실시간 이벤트가 없으면 주기적으로 다시 읽는다.
  *
@@ -25,7 +64,7 @@ export function useInterval(fn: () => void, ms: number, active: boolean): void {
  * 서버에 연결되지 않아도 보관함에 있는 것은 보인다.
  */
 export function useChannelLogs(channelId: string | null, active: boolean, initialSize = 100) {
-  const { settings, realtime } = useApp()
+  const { realtime } = useApp()
   const [messages, setMessages] = useState<Message[]>([])
   const [limit, setLimit] = useState(initialSize)
   const [hasOlder, setHasOlder] = useState(false)
@@ -91,8 +130,8 @@ export function useChannelLogs(channelId: string | null, active: boolean, initia
   }, [load])
 
   // 실시간 연결이 되어 있으면 이벤트로, 아니면 폴링으로. 실시간이어도 놓친 것을 위해 느린 폴링은 유지한다.
-  const pollMs = (settings?.dooray.pollSeconds ?? 4) * 1000 * (realtime.mode === 'socket' ? 8 : 1)
-  useInterval(() => void load(true), pollMs, active && !!channelId)
+  const socket = realtime.mode === 'socket'
+  usePolling(() => void load(true), socket ? POLL_REALTIME_MS : POLL_FOCUSED_MS, socket ? POLL_REALTIME_MS : POLL_BACKGROUND_MS, active && !!channelId)
 
   useEffect(() => {
     if (!channelId) return

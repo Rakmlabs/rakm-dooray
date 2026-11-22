@@ -7,6 +7,7 @@
 // - 'c-history': 메시지 1500개 → 서버는 최신 1000개만 준다 (로컬 보관 시연)
 // - 새 메시지 도착: SHELL_MOCK_ARRIVE_MS(기본 45초)마다 다른 사람이 메시지를 보낸다 (안 읽음·알림 시연)
 //   0 이면 끈다. 시험용으로 POST /mock/shell/arrive {channelId, text, sender} 로 바로 도착시킬 수 있다.
+// - POST /mock/shell/newdm {sender, text}: 새 1:1 방이 생기며 첫 메시지가 온다
 // - POST /mock/shell/flood {channelId, n}: n개를 더 보내 오래된 것을 서버의 1000개 창 밖으로 밀어낸다
 // - POST /messenger/v1/channels/direct-send (1:1 첫 메시지; 방이 없으면 만든다)
 // - GET logs 는 실제처럼 최대 1000개까지만
@@ -108,6 +109,15 @@ export async function handle(ctx) {
     const b = await body(req)
     const l = arrive(state, b.channelId ?? 'c-alpha', b.sender ?? 'm-co', b.text ?? '새 메시지 도착')
     return send(200, ok({ id: l.id })), true
+  }
+  // 다른 사람이 나에게 처음으로 1:1 을 보내 새 방이 생기는 상황 (새 방의 안 읽음 확인용)
+  if (p === '/mock/shell/newdm' && req.method === 'POST') {
+    const b = await body(req)
+    const who = b.sender ?? 'm-sales'
+    const c = { id: `c-dm-new-${who}`, title: '', type: 'direct', members: [state.ME, who], updatedAt: new Date().toISOString() }
+    if (!state.channels.some((x) => x.id === c.id)) state.channels.push(c)
+    const l = arrive(state, c.id, who, b.text ?? '처음 보내는 1:1 메시지')
+    return send(200, ok({ channelId: c.id, id: l.id })), true
   }
   if (p === '/mock/shell/flood' && req.method === 'POST') {
     const b = await body(req)

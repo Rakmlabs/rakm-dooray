@@ -7,7 +7,6 @@ export interface PublicSettings {
     /** 고정값 (api.dooray.com, rakm.dooray.com). 화면에서 바꾸지 않는다. */
     apiBase: string
     domain: string
-    pollSeconds: number
     tokenSource: SecretSource
   }
   mail: {
@@ -25,7 +24,6 @@ export interface PublicSettings {
 
 export interface SettingsInput {
   dooray?: {
-    pollSeconds?: number
     /** 문자열이면 저장, null 이면 삭제, undefined 면 유지 */
     token?: string | null
   }

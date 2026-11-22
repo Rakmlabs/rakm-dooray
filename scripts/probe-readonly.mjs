@@ -1,6 +1,8 @@
 // 읽기 전용 실호출 점검. .env 의 토큰·메일 계정으로 "읽기" 호출만 해 보고 결과의 형태와 개수만 출력한다.
 // 메시지 본문·메일 제목 같은 내용은 출력하지 않는다. 토큰·비밀번호도 출력하지 않는다.
 //   npm run probe              두레이 API + IMAP 점검
+//   npm run probe -- --fields  채널·메시지(logs)·멤버 응답의 "필드 이름"만 모두 출력 (값은 출력하지 않음).
+//                              읽음 수·읽은 위치 같은 필드가 실제로 오는지 확인하는 용도.
 //   npm run probe -- --socket  Socket Mode 토큰 발급(POST, 콘텐츠를 바꾸지 않음)까지 시도
 import { readFileSync, existsSync } from 'node:fs'
 import { ImapFlow } from 'imapflow'
@@ -13,8 +15,8 @@ if (existsSync('.env')) {
     if (m && m[2]) env[m[1]] = m[2].replace(/^["']|["']$/g, '')
   }
 }
-const BASE = 'https://api.dooray.com' // 앱과 같이 고정
-const TOKEN = env.DOORAY_TOKEN
+const BASE = process.env.DOORAY_MOCK_BASE || 'https://api.dooray.com' // 앱과 같이 고정 (모의 서버로 확인할 때만 바꾼다)
+const TOKEN = env.DOORAY_TOKEN || process.env.DOORAY_TOKEN
 const results = []
 const report = (name, ok, detail) => {
   results.push({ name, ok, detail })
@@ -29,8 +31,34 @@ async function get(path) {
   } catch {
     /* 무시 */
   }
-  return { status: res.status, body, rate: res.headers.get('x-ratelimit-remaining') }
+  return {
+    status: res.status,
+    body,
+    rate: res.headers.get('x-ratelimit-remaining'),
+    burst: res.headers.get('x-ratelimit-burst-capacity'),
+    replenish: res.headers.get('x-ratelimit-replenish-rate')
+  }
 }
+
+/** 값 없이 필드 경로만 모은다. 배열 원소는 [] 로 합친다. 예: users.participants[].member.organizationMemberId */
+function fieldPaths(v, prefix = '', out = new Set()) {
+  if (Array.isArray(v)) {
+    if (!v.length) out.add(prefix + '[]')
+    for (const x of v) fieldPaths(x, prefix + '[]', out)
+  } else if (v && typeof v === 'object') {
+    for (const [k, x] of Object.entries(v)) fieldPaths(x, prefix ? `${prefix}.${k}` : k, out)
+  } else if (prefix) {
+    out.add(`${prefix}  (${v === null ? 'null' : typeof v})`)
+  }
+  return out
+}
+const READ_HINT = /read|unread|seen|ack|lastlog|readlog/i // 읽음 관련일 수 있는 이름에 ★ (seq 는 메시지 순번이라 뺐다)
+function printFields(title, value) {
+  const paths = [...fieldPaths(value)].sort()
+  console.log(`\n--- ${title}: 필드 ${paths.length}개 (값은 표시하지 않음)`)
+  for (const p of paths) console.log(`   ${READ_HINT.test(p.split('  ')[0]) ? '★' : ' '} ${p}`)
+}
+const FIELDS = process.argv.includes('--fields')
 
 const keys = (o) => (o && typeof o === 'object' ? Object.keys(o).sort().join(',') : String(o))
 
@@ -38,12 +66,18 @@ if (!TOKEN) {
   console.log('DOORAY_TOKEN 이 .env 에 없어 두레이 API 점검을 건너뜁니다.')
 } else {
   const me = await get('/common/v1/members/me')
-  report('GET /common/v1/members/me', me.status === 200 && me.body?.header?.isSuccessful, `HTTP ${me.status}, rate-remaining=${me.rate}`)
+  report(
+    'GET /common/v1/members/me',
+    me.status === 200 && me.body?.header?.isSuccessful,
+    `HTTP ${me.status}, 요청 제한: 남은 토큰=${me.rate}, 최대(버스트)=${me.burst}, 초당 보충=${me.replenish}`
+  )
+  if (FIELDS) printFields('GET /common/v1/members/me', me.body)
 
   const ch = await get('/messenger/v1/channels')
   const list = ch.body?.result ?? []
   const byType = list.reduce((a, c) => ((a[c.type] = (a[c.type] ?? 0) + 1), a), {})
   report('GET /messenger/v1/channels', ch.status === 200, `HTTP ${ch.status}, ${list.length}개, 종류별 ${JSON.stringify(byType)}`)
+  if (FIELDS) printFields('GET /messenger/v1/channels (모든 대화방 합침)', ch.body)
 
   for (const type of ['direct', 'private']) {
     const c = list.find((x) => x.type === type && x.status !== 'deleted')
@@ -59,10 +93,22 @@ if (!TOKEN) {
       logs.status === 200 && Array.isArray(logs.body?.result),
       `HTTP ${logs.status}, ${items.length}개, 스레드 달린 메시지 ${withThread}개, 필드: ${keys(items[0])}`
     )
+    // 채널 목록의 updatedAt 이 마지막 메시지 시각을 따라가는지 (안 읽음 계산을 빠르게 할 수 있는지)
+    const newest = items.map((m) => Date.parse(m.sentAt)).filter(Number.isFinite).sort((a, b) => b - a)[0]
+    if (newest) report(`채널 updatedAt 이 마지막 메시지 이후인가 (${type})`, true, Date.parse(c.updatedAt) >= newest - 1000 ? '예' : '아니오')
+    if (FIELDS) {
+      printFields(`GET .../logs?size=20 (${type})`, logs.body)
+      const who = c.users?.participants?.find((p) => p.member?.organizationMemberId && p.member.organizationMemberId !== c.me?.member?.organizationMemberId)
+      if (who) {
+        const m = await get(`/common/v1/members/${who.member.organizationMemberId}`)
+        printFields(`GET /common/v1/members/{id} (${type} 상대)`, m.body)
+      }
+    }
     const t = items.find((m) => m.thread?.channelId)
     if (t) {
       const tl = await get(`/messenger/v1/channels/${t.thread.channelId}/logs?size=5`)
       report('GET 스레드 채널 logs (비공식)', tl.status === 200, `HTTP ${tl.status}, ${(tl.body?.result ?? []).length}개`)
+      if (FIELDS) printFields('GET 스레드 채널 logs', tl.body)
     }
   }
 

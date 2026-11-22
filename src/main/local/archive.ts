@@ -222,9 +222,9 @@ export class LocalArchive {
     return r?.read_ms ?? null
   }
 
-  /** at 이 없으면 보관함의 가장 최근 메시지 시각까지 읽음으로 */
+  /** at 이 없으면 보관함의 가장 최근 메시지 시각까지 읽음으로 (아직 받은 것이 없으면 지금까지) */
   markRead(channelId: string, at?: number): number {
-    const latest = (this.st.maxSent.get(channelId) as { m: number | null }).m ?? 0
+    const latest = (this.st.maxSent.get(channelId) as { m: number | null }).m ?? Date.now()
     const value = Math.max(at ?? latest, this.readMs(channelId) ?? 0)
     this.st.setRead.run(channelId, value)
     return value

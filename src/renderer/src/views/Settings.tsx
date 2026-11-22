@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { SecretSource, TestResult } from '@shared/types'
 import { call, errorText } from '../api'
 import { useApp } from '../state'
@@ -8,6 +8,8 @@ import { AppearanceSettings, NotificationSettings, Shortcuts, StorageSettings, W
 
 /** 새 버전은 여기서 내려받는다 (비공개 저장소라 자동 업데이트는 하지 않는다) */
 const RELEASES_URL = 'https://github.com/Rakmlabs/rakm-dooray/releases'
+/** 개인 API 토큰 발급 화면 (두레이 웹) */
+const TOKEN_URL = 'https://rakm.dooray.com/setting/api/token'
 
 // 메일 설정(IMAP/SMTP)은 지금 쓰지 않아 화면에서 뺐다 (Free 플랜이라 IMAP 불가). main 쪽 코드와 IPC 는 남아 있다.
 
@@ -22,18 +24,14 @@ const TOKEN_OK = /^[\x21-\x7E]+$/
 
 export function SettingsView() {
   const { settings, reloadSettings, toast, realtime } = useApp()
-  const [pollSeconds, setPollSeconds] = useState(4)
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [doorayTest, setDoorayTest] = useState<TestResult | null>(null)
 
-  useEffect(() => {
-    if (settings) setPollSeconds(settings.dooray.pollSeconds)
-  }, [settings])
-
   if (!settings) return <div className="empty">불러오는 중…</div>
 
   const trimmed = token.trim()
+  const noToken = settings.dooray.tokenSource === 'none'
   const tokenError = trimmed && !TOKEN_OK.test(trimmed) ? '토큰에 한글이나 공백이 섞였습니다. 발급받은 토큰만 그대로 붙여 넣으세요.' : null
 
   async function save(e: { preventDefault(): void }) {
@@ -42,7 +40,7 @@ export function SettingsView() {
     setBusy(true)
     setDoorayTest(null)
     try {
-      await call('settings:save', { dooray: { pollSeconds, ...(trimmed ? { token: trimmed } : {}) } })
+      if (trimmed) await call('settings:save', { dooray: { token: trimmed } })
       setToken('')
       await reloadSettings()
       setDoorayTest(await call('settings:testDooray'))
@@ -81,17 +79,31 @@ export function SettingsView() {
         </div>
       )}
 
-      <form className="card" onSubmit={save}>
-        <h2>두레이 연결</h2>
+      <form className={`card token-card ${noToken ? 'token-card-first' : ''}`} onSubmit={save}>
+        <h2>{noToken ? '두레이 개인 API 토큰을 넣어 시작하세요' : '두레이 연결'}</h2>
+        <div className="token-help">
+          <ol>
+            <li>
+              <button type="button" className={noToken ? 'primary' : ''} onClick={() => void call('shell:openExternal', TOKEN_URL)}>
+                여기서 발급
+              </button>
+              을 눌러 두레이 웹의 토큰 화면을 엽니다.
+            </li>
+            <li>“토큰 생성”을 눌러 새 토큰을 만듭니다.</li>
+            <li>만든 토큰을 복사해 아래 칸에 붙여 넣고 “저장하고 연결 확인”을 누릅니다.</li>
+          </ol>
+          <small className="muted">{TOKEN_URL.replace('https://', '')} · 로그인한 내 계정으로 발급됩니다.</small>
+        </div>
         <label>
           <span>개인 API 토큰</span>
           <input
             type="password"
             autoComplete="off"
+            autoFocus={noToken}
             value={token}
             onChange={(e) => setToken(e.target.value)}
             aria-invalid={!!tokenError}
-            placeholder={settings.dooray.tokenSource === 'none' ? '두레이 개인설정 > API > 개인 인증 토큰' : '바꿀 때만 입력'}
+            placeholder={noToken ? '복사한 토큰을 여기에 붙여 넣기' : '바꿀 때만 입력'}
           />
           {tokenError ? (
             <small className="err">{tokenError}</small>
@@ -103,22 +115,12 @@ export function SettingsView() {
                   지우기
                 </button>
               )}
+              {' · '}수신 방식: {realtime.mode === 'socket' ? '실시간 연결됨' : '자동 새로고침'}
             </small>
           )}
         </label>
-        <label>
-          <span>열린 대화방 새로고침 간격 (초)</span>
-          <input
-            type="number"
-            min={2}
-            max={60}
-            value={pollSeconds}
-            onChange={(e) => setPollSeconds(Number(e.target.value) || 4)}
-          />
-          <small>수신 방식: {realtime.mode === 'socket' ? '실시간 연결됨' : realtime.detail || '폴링'}</small>
-        </label>
         <div className="row">
-          <button className="primary" disabled={busy || !!tokenError}>
+          <button className="primary" disabled={busy || !!tokenError || (noToken && !trimmed)}>
             {busy ? '저장하고 확인하는 중…' : '저장하고 연결 확인'}
           </button>
           {doorayTest && <span className={doorayTest.ok ? 'ok' : 'err'}>{doorayTest.message}</span>}

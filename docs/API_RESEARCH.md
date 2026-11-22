@@ -47,9 +47,24 @@
   → `wss://{회사도메인}/messenger/v5/ws/{tenantId}/{memberId}` 에 `Bearer accessToken` 으로 접속. 이벤트 `type=channelLog`, `action=create|update`.
   README 상 "에이전트 설정에서 발급한 에이전트 토큰" 전용이다. 개인 토큰으로 토큰 발급이 되는지, 된다면 내 모든 대화가 오는지는 **알 수 없다**.
 - 결론: 앱은 Socket Mode 를 **선택적으로 시도**하고(설정에 회사 도메인 입력 시), 실패하면 **폴링**으로 동작한다.
-  폴링은 비공식 `GET .../logs` 에 의존한다. 열려 있는 대화방·스레드만 짧은 주기(기본 4초)로, 채널 목록은 30초마다 조회한다.
+  폴링은 비공식 `GET .../logs` 에 의존한다. 열려 있는 대화방·스레드만 짧은 주기(창이 앞에 있으면 3초)로, 채널 목록은 30초마다 조회한다.
   채널 목록의 `updatedAt` 이 새 메시지마다 바뀌는지는 확인되지 않았다 → 안 읽은 표시는 근사치다.
 - 두레이 서버의 "읽음" 상태를 읽거나 쓰는 API 는 없다. 안 읽음 표시는 이 앱이 로컬에서 계산한다.
+
+### 읽음 확인 재확인 (2026-11-22)
+- 공식 문서 메신저 절(`GET /messenger/v1/channels` 등 9개 API): 응답 필드는 id, title, organization, type, users.participants,
+  me, capacity, status, createdAt, updatedAt, displayed, role, archivedAt 뿐. 읽음 수·읽은 위치·안 읽음 수 필드 없음. 읽음 처리 API 도 없음.
+- 공식 `GET /common/v1/streams`(활동 피드)에는 `read` 필터·필드가 있으나 대상이 project, mail, schedule, event, post, page,
+  pageComment, fileEvent 뿐이고 메신저는 없다.
+- dooray-go/dooray-sdk 의 채널 모델(openapi/model/messenger/channel.go)과 Socket Mode 이벤트, my13each/DoorayMCPwithMessenger 의
+  `Channel`·`ChannelMessage` 타입(id, seq, type, sender, sentAt, text, flags, attachments, file)에도 읽음 관련 필드가 없다. `seq` 는 메시지 순번.
+- 실제 응답에 문서에 없는 필드가 오는지는 `npm run probe -- --fields` 로 필드 이름만 뽑아 확인할 수 있다 (실계정 미확인).
+- 결론: 상대가 내 메시지를 읽었는지는 공개 API 로 알 수 없어 앱에 표시하지 않는다. 두레이 웹의 비공개 API 를 세션 쿠키로 부르는 방식은 쓰지 않는다.
+
+### 요청 제한 (공식)
+- 토큰 버킷, 1초마다 `X-RateLimit-Replenish-Rate` 만큼 보충, 최대 `X-RateLimit-Burst-Capacity`. 수치는 고지 없이 바뀔 수 있어 헤더를 보라고 한다.
+- 앱: 열린 방 3초(창이 뒤면 10초, 숨기면 멈춤) + 뒤에서 안 읽음 확인(15초마다 3~4방) + 채널 목록 30초 → 평소 초당 1회 안쪽.
+  남은 토큰이 2 미만이면 1초 쉬고 보내며, 429 는 Retry-After 를 따라 3번까지 다시 시도한다.
 
 ### (c) 1:1 / 그룹 대화
 - 공식: `GET /channels` 는 "속한 대화방 목록"이며 `direct`(1:1)와 `private`(그룹)를 모두 돌려준다. 개인 토큰은 계정과 같은 권한이다.

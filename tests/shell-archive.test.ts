@@ -111,6 +111,22 @@ describe('안 읽음 (로컬 추정)', () => {
     expect(a.readMs('c1')).toBe(v)
   })
 
+  it('받은 것이 없는 방을 읽음으로 하면 0 이 아니라 지금 시각까지 (나중에 온 예전 메시지가 안 읽음으로 쏟아지지 않게)', () => {
+    const a = db()
+    const before = Date.now()
+    expect(a.markRead('c1')).toBeGreaterThanOrEqual(before)
+    a.ingest('c1', range(1, 5), 50)
+    expect(a.summary('c1', 'me').unread).toBe(0)
+  })
+
+  it('처음 보는 방: 기준 시각 이전 것은 읽음, 이후에 온 남의 메시지는 안 읽음 (새로 생긴 1:1 등)', () => {
+    const a = db()
+    a.ingest('c1', range(1, 10), 50)
+    a.markRead('c1', T0 + 6 * 60_000 + 1) // 앱을 처음 켠 시각이 6번과 7번 사이
+    // 7, 9 가 남의 메시지 (홀수)
+    expect(a.summary('c1', 'me').unread).toBe(2)
+  })
+
   it('요약에 마지막 메시지 미리보기가 들어간다', () => {
     const a = db()
     a.ingest('c1', [msg(1, { text: '**굵게** 와 `코드`' })], 50)

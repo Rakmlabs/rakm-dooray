@@ -169,10 +169,19 @@ export class DoorayHttp {
     return u.toString()
   }
 
-  /** 429 일 때 다시 시도하는 fetch */
+  /** 마지막 응답의 X-RateLimit-Remaining (남은 요청 토큰). 모르면 null */
+  private rateRemaining: number | null = null
+
+  /** 429 일 때 다시 시도하는 fetch. 남은 토큰이 거의 없으면 1초(토큰이 차는 주기) 쉬고 보낸다. */
   private async send(url: string, init: RequestInit): Promise<Response> {
     for (let attempt = 0; ; attempt++) {
+      if (this.rateRemaining !== null && this.rateRemaining < 2) {
+        this.rateRemaining = null
+        await sleep(1000)
+      }
       const res = await this.fetchImpl(url, init)
+      const left = Number(res.headers.get('x-ratelimit-remaining'))
+      this.rateRemaining = res.headers.has('x-ratelimit-remaining') && Number.isFinite(left) ? left : null
       if (res.status !== 429 || attempt >= 3) return res
       const retryAfter = Number(res.headers.get('retry-after'))
       await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 800 * (attempt + 1))

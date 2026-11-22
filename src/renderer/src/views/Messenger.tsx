@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import type { Channel, Member, Message, ProjectGroup } from '@shared/types'
 import type { ChannelSummary } from '@shared/types-shell'
-import { call, errorText } from '../api'
+import { call, errorText, onEvent } from '../api'
 import { rememberMember, useApp, useMemberNames } from '../state'
 import { useChannelLogs, useInterval } from '../lib/hooks'
 import {
@@ -196,6 +196,8 @@ export function MessengerView({ active }: { active: boolean }) {
     void call('shell:viewing', viewing).catch(() => {})
   }, [viewing])
   useEffect(() => () => void call('shell:viewing', null).catch(() => {}), [])
+  // 창이 뒤에 있는 동안 온 메시지 앞에 "여기까지 읽음" 을 다시 긋는다 (창이 앞에 오면 main 이 알려 준다)
+  useEffect(() => onEvent('shell:readMarker', (m) => setReadMarker({ channelId: m.channelId, at: m.readAt })), [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

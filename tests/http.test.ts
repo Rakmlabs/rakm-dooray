@@ -60,6 +60,18 @@ describe('DoorayHttp', () => {
     expect(f).toHaveBeenCalledTimes(2)
   })
 
+  it('남은 요청 토큰이 바닥나면 1초 쉬고 다음 요청을 보낸다', async () => {
+    const times: number[] = []
+    const f = vi.fn(async () => {
+      times.push(Date.now())
+      return json({ header: { isSuccessful: true }, result: 'ok' }, 200, { 'x-ratelimit-remaining': '1' })
+    })
+    const http = new DoorayHttp(cfg, f as unknown as typeof fetch)
+    await http.get('/a')
+    await http.get('/b')
+    expect(times[1] - times[0]).toBeGreaterThanOrEqual(950)
+  })
+
   it('다운로드: 307 을 직접 따라가며 file-api 에도 인증 헤더를 붙인다', async () => {
     const f = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
       if (String(url).startsWith('https://api.dooray.com')) {

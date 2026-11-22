@@ -60,6 +60,8 @@ export class ShellService {
   private lastWikiPage: { wikiId: string; pageId: string } | null = null
   private memberCache = new Map<string, Member>()
   private notifications = new Set<Notification>()
+  /** 이 시각 이후에 온 메시지는 처음 보는 대화방이어도 안 읽음으로 센다 (설치·업데이트 직후 첫 실행 시각) */
+  private baselineMs = Date.now()
 
   constructor(private readonly deps: ShellDeps) {}
 
@@ -68,6 +70,9 @@ export class ShellService {
     try {
       this.archive = new LocalArchive(join(dataDir('local'), 'archive.db'))
       const last = this.archive.kv('lastWikiPage')
+      const base = Number(this.archive.kv('unreadBaseline'))
+      if (Number.isFinite(base) && base > 0) this.baselineMs = base
+      else this.archive.setKv('unreadBaseline', String(this.baselineMs))
       if (last) this.lastWikiPage = JSON.parse(last)
     } catch (e) {
       // 보관함을 못 열어도 앱은 서버 데이터만으로 동작한다
@@ -199,14 +204,11 @@ export class ShellService {
       return 0
     }
     if (!known) return added.length // 스레드 채널 등은 보관만 한다
-    if (readBefore === null) {
-      // 처음 보는 대화방: 지금까지 것은 읽은 것으로 시작한다 (설치 직후 안 읽음이 쏟아지지 않게)
-      a.markRead(channelId)
-    } else if (this.watching(channelId)) {
-      a.markRead(channelId)
-    } else if (added.length) {
-      void this.notify(channelId, added, readBefore)
-    }
+    // 처음 보는 대화방: 앱을 처음 켠 시각 이전 것만 읽은 것으로 시작한다.
+    //   설치 직후 예전 메시지가 안 읽음으로 쏟아지지 않게 하되, 그 뒤에 새로 생긴 방(처음 온 1:1 등)의 메시지는 안 읽음으로 센다.
+    const readFrom = readBefore ?? a.markRead(channelId, this.baselineMs)
+    if (this.watching(channelId)) a.markRead(channelId)
+    else if (added.length) void this.notify(channelId, added, readFrom)
     this.scheduleUnread()
     return added.length
   }
@@ -230,17 +232,26 @@ export class ShellService {
     if (channelId && this.deps.isFocused()) this.markRead(channelId)
   }
 
-  /** 창이 다시 앞에 오면 보고 있던 방은 읽은 것으로 */
+  /** 창이 다시 앞에 오면 보고 있던 방은 읽은 것으로. 그 사이 온 것이 있으면 화면에 "여기까지 읽음" 위치를 다시 알린다 */
   onFocus(): void {
-    if (this.viewing) this.markRead(this.viewing)
+    const id = this.viewing
+    const a = this.archive
+    if (!id || !a) return
+    const before = a.readMs(id)
+    if (a.markRead(id) === before) return
+    this.scheduleUnread()
+    this.deps.emit('shell:readMarker', { channelId: id, readAt: before === null ? null : new Date(before).toISOString() })
   }
 
+  /** 대화방을 열 때. 창이 앞에 있을 때만 읽음으로 바꾼다 (로그인 때 뒤에서 켜지며 마지막 방을 다시 열 때는 그대로 둔다) */
   openChannel(channelId: string): { readAt: string | null } {
     const a = this.archive
     if (!a) return { readAt: null }
     const before = a.readMs(channelId)
-    a.markRead(channelId)
-    this.scheduleUnread()
+    if (this.deps.isFocused()) {
+      a.markRead(channelId)
+      this.scheduleUnread()
+    }
     return { readAt: before === null ? null : new Date(before).toISOString() }
   }
 
@@ -352,18 +363,27 @@ export class ShellService {
       // 3) updatedAt 이 새 메시지마다 바뀌는지 확인되지 않아, 나머지 방도 돌아가며 조금씩 본다.
       //    앱을 켠 직후 한 번은 모든 방을 훑어 꺼져 있던 동안의 안 읽음을 바로 계산한다.
       const live = channels.filter((c) => c.status !== 'deleted').sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
-      if (this.firstScan) {
-        this.firstScan = false
+      const fullScan = this.firstScan
+      if (fullScan) {
         for (const c of live) add(c.id, 50)
       } else {
         for (let i = 0; i < Math.min(3, live.length); i++) add(live[(this.rr + i) % live.length].id, 30)
         this.rr += 3
       }
+      // 한 방이 실패해도 나머지는 계속 본다. 전부 훑은 뒤에만 첫 훑기를 끝낸 것으로 친다 (켜자마자 네트워크가 없었으면 다음 차례에 다시)
+      let failed: unknown = null
       for (const t of targets) {
-        await this.fetchInto(t.id, t.size)
-        if (t.size === 1000) this.archive?.setBackfilled(t.id)
+        try {
+          await this.fetchInto(t.id, t.size)
+          if (t.size === 1000) this.archive?.setBackfilled(t.id)
+        } catch (e) {
+          failed = e
+          if (!(e instanceof DoorayApiError) || e.status === 429 || e.status >= 500) break
+        }
         await sleep(GAP_MS)
       }
+      if (failed) throw failed
+      if (fullScan) this.firstScan = false
       this.noteResult(null)
     } catch (e) {
       this.noteResult(e)

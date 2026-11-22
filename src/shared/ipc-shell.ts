@@ -59,6 +59,8 @@ export interface ShellAreaEvents {
   'shell:navigate': NavTarget
   'shell:connectionChanged': ConnectionState
   'shell:state': ShellState
+  /** 창이 다시 앞에 와서 보고 있던 방을 읽음으로 바꿨을 때, 바꾸기 전 읽은 시각 ("여기까지 읽음" 위치) */
+  'shell:readMarker': { channelId: string; readAt: string | null }
 }
 
-export const SHELL_AREA_EVENTS: (keyof ShellAreaEvents)[] = ['shell:unread', 'shell:navigate', 'shell:connectionChanged', 'shell:state']
+export const SHELL_AREA_EVENTS: (keyof ShellAreaEvents)[] = ['shell:unread', 'shell:navigate', 'shell:connectionChanged', 'shell:state', 'shell:readMarker']
