@@ -45,6 +45,8 @@ export interface LinkPreview {
 export interface ChatPrefs {
   /** 메시지 속 링크의 미리보기 카드 (main 이 외부 사이트에 요청한다) */
   linkPreview: boolean
+  /** 스레드 기능(스레드 탭·새 주제·스레드로 답하기). 기본 끔. 꺼도 이미 있는 스레드는 열어 보고 지울 수 있다 */
+  threads: boolean
 }
 
 /** 답장 메시지 ID → 원 메시지 (이 앱에서 보낸 답장만 안다) */

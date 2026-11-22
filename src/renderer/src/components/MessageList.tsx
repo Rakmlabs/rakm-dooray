@@ -14,7 +14,7 @@ import { Avatar } from './people/Avatar'
 import { useProfileCard } from './people/ProfileCard'
 import { ChatIcon } from './chat/ChatIcon'
 import { closeOpenFence, insideCodeFence } from './chat/composerText'
-import { ThreadDeleteDialog, threadDeleteMessage } from './chat/threadActions'
+import { ThreadDeleteDialog, deleteReasonHint, threadDeleteMessage } from './chat/threadActions'
 import { LinkPreviewCard } from './chat/LinkPreviewCard'
 import { BookmarksPanel } from './chat/BookmarksPanel'
 import { WikiSendDialog } from './chat/WikiSendDialog'
@@ -352,7 +352,7 @@ function MessageItem({
       await call('messenger:delete', m.channelId, m.id)
       onChanged()
     } catch (e) {
-      toast(errorText(e))
+      toast(deleteReasonHint(errorText(e)))
     }
   }
 

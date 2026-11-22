@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from 'electron'
 import { readFile, writeFile } from 'node:fs/promises'
+import { appendFileSync, mkdirSync, renameSync, statSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import { IPC_CHANNELS, type IpcChannel, type IpcContract, type IpcEventName, type IpcEvents } from '@shared/ipc'
 import { DoorayHttp, NotConfiguredError } from './dooray/http'
@@ -37,6 +38,22 @@ const http = new DoorayHttp(async () => {
   const token = await getSecret('doorayToken')
   return token ? { apiBase: getSettings().dooray.apiBase, token } : null
 })
+// 쓰기 요청 실패의 서버 응답(상태·코드·사유)을 userData/logs/api.log 에 남긴다 (토큰·본문 없음). 실계정 문제 조사용
+http.onWriteFailure = (f) => {
+  try {
+    const dir = join(app.getPath('userData'), 'logs')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, 'api.log')
+    try {
+      if (statSync(file).size > 512 * 1024) renameSync(file, file + '.1')
+    } catch {
+      /* 아직 없음 */
+    }
+    appendFileSync(file, `${new Date().toISOString()} ${f.method} ${f.path} → ${f.status} code=${f.resultCode ?? '-'} ${f.message.replace(/\s+/g, ' ').slice(0, 500)}\n`)
+  } catch {
+    /* 기록 실패는 무시 */
+  }
+}
 const messenger = new MessengerApi(http)
 const wiki = new WikiApi(http)
 const realtime = new RealtimeService({

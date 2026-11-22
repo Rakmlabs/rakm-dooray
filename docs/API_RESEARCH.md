@@ -81,6 +81,14 @@
   메시지 삭제는 `DELETE /channels/{id}/logs/{logId}`(공개 API 와 같은 형태)이고, 스레드 채널 ID 를 넣으면 스레드 답글이 지워진다(모의 서버로만 확인).
   첫 메시지를 지우면 답글이 남은 동안 `flags=DELETED_ROOT` 로 남는다. 남의 메시지 삭제 권한은 공개 문서에 없다(보낸 사람만으로 본다).
   → 앱의 "스레드 삭제" = 내 답글 + (내 것이면) 첫 메시지를 지우고, 남는 게 있으면 이 컴퓨터에서 목록 숨김.
+- **메시지 수정·삭제 시간 제한 (v0.1.5 실계정에서 삭제 실패로 발견)**: 웹 번들의 `messengerGeneralSetting = { canDeleteMessage, messageDeletablePeriodMinutes(기본 5) }`
+  (`GET {WAS}/settings/messenger.general`, 웹 내부 API)와 `canDeleteLog = 메뉴 권한 && isLogInEditableTime(log)` — 작성 후 N분이 지나면
+  삭제·수정 메뉴가 사라진다("나와의 대화"는 예외). 서버 오류 코드 `CHANNEL_LOG_EXPIRED_DELETE_TIME_ERROR` = "작성 후, {{minutes}}분 이내에만 삭제할 수 있습니다."
+  (`..._MODIFY_TIME_ERROR` 는 수정). 공개 API 에는 이 설정을 읽는 방법이 없다.
+  - v0.1.5 에서 50분쯤 지난 내 스레드(첫 메시지+답글)를 지우려다 2개 모두 실패한 것이 이 제한으로 보인다. **실계정 응답 원문은 아직 못 봤다**
+    (토큰이 키체인에 암호화돼 있어 개발 환경에서 같은 계정으로 호출하지 않았다).
+  - v0.1.6 부터 쓰기 요청(POST/PUT/DELETE) 실패는 `userData/logs/api.log` 에 `메서드 경로 → 상태 code=결과코드 사유` 로 남고(토큰·본문 없음),
+    삭제 실패 토스트에 서버 사유를 그대로 보여 준다. 다시 시도하면 원인을 확정할 수 있다.
 - **이모지 리액션**: 웹 메신저에는 있다(👍❤️✔ 등, `EmojiReactionList`). 그러나 공개 API 문서에 메신저 리액션 API 가 없고,
   웹이 쓰는 내부 API 는 세션 쿠키 기반이라(이 앱 원칙상 쓰지 않음) 구현하지 않았다. 받은 메시지의 리액션도 `logs` 응답에 없다(커뮤니티 타입 기준).
 

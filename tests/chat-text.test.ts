@@ -132,3 +132,13 @@ describe('코드 서식 넣기', () => {
     expect(closeOpenFence('```\na\n```')).toBe('```\na\n```')
   })
 })
+
+describe('메시지 삭제 실패 사유', () => {
+  it('삭제 가능 시간 초과면 관리자 설정 안내를 붙인다', async () => {
+    const { deleteReasonHint } = await import('../src/renderer/src/components/chat/threadActions')
+    const r = deleteReasonHint('DELETE /messenger/v1/channels/1/logs/2 실패: 작성 후, 5분 이내에만 삭제할 수 있습니다.')
+    expect(r.startsWith('작성 후, 5분 이내에만 삭제할 수 있습니다.')).toBe(true)
+    expect(r).toContain('관리자 설정')
+    expect(deleteReasonHint('DELETE /x 실패: 권한 없음 (403)')).toBe('권한 없음 (403)')
+  })
+})

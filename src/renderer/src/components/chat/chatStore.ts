@@ -24,7 +24,7 @@ function createStore<T>(initial: T) {
 
 // ---------- 설정 ----------
 
-const prefsStore = createStore<ChatPrefs>({ linkPreview: true })
+const prefsStore = createStore<ChatPrefs>({ linkPreview: true, threads: false })
 let prefsLoaded = false
 
 export function useChatPrefs(): [ChatPrefs, (patch: Partial<ChatPrefs>) => Promise<void>] {

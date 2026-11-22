@@ -143,6 +143,8 @@ export function parseContentDispositionFileName(header: string | null): string |
 
 export class DoorayHttp {
   private readonly fetchImpl: FetchLike
+  /** 쓰기 요청(POST/PUT/DELETE) 실패를 남길 곳 (main 이 userData/logs/api.log 로 연결). 토큰·본문은 넘기지 않는다 */
+  onWriteFailure: ((info: { method: string; path: string; status: number; resultCode: number | null; message: string }) => void) | null = null
 
   constructor(
     private readonly getConfig: () => Promise<DoorayConfig | null>,
@@ -201,6 +203,14 @@ export class DoorayHttp {
     const ok = res.ok && (body?.header?.isSuccessful ?? res.ok)
     if (!ok) {
       const msg = decodeServerMessage(body?.header?.resultMessage || '') || statusMessage(res.status)
+      const [method, ...rest] = what.split(' ')
+      if (method !== 'GET') {
+        try {
+          this.onWriteFailure?.({ method, path: rest.join(' '), status: res.status, resultCode: body?.header?.resultCode ?? null, message: msg })
+        } catch {
+          /* 로그 실패는 무시 */
+        }
+      }
       throw new DoorayApiError(`${what} 실패: ${msg}`, res.status, body?.header?.resultCode ?? null)
     }
     return { result: (body?.result ?? null) as T, totalCount: body?.totalCount }

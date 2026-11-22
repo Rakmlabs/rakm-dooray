@@ -25,11 +25,14 @@ const bookmarkStore = jsonStore<ChatBookmark[]>('chat-bookmarks.json', [])
 const prefsStore = jsonStore<Partial<ChatPrefs>>('chat-prefs.json', {})
 const replyStore = jsonStore<ReplyRef[]>('chat-reply-refs.json', [])
 
-const DEFAULT_PREFS: ChatPrefs = { linkPreview: true }
+const DEFAULT_PREFS: ChatPrefs = { linkPreview: true, threads: false }
 
 function readPrefs(): ChatPrefs {
   const p = prefsStore.read()
-  return { linkPreview: typeof p.linkPreview === 'boolean' ? p.linkPreview : DEFAULT_PREFS.linkPreview }
+  return {
+    linkPreview: typeof p.linkPreview === 'boolean' ? p.linkPreview : DEFAULT_PREFS.linkPreview,
+    threads: typeof p.threads === 'boolean' ? p.threads : DEFAULT_PREFS.threads
+  }
 }
 
 export function chatAreaHandlers(ctx: MainContext): HandlersFor<ChatAreaContract> {
@@ -118,6 +121,7 @@ export function chatAreaHandlers(ctx: MainContext): HandlersFor<ChatAreaContract
     async 'chat:savePrefs'(patch) {
       const next: ChatPrefs = { ...readPrefs() }
       if (typeof patch?.linkPreview === 'boolean') next.linkPreview = patch.linkPreview
+      if (typeof patch?.threads === 'boolean') next.threads = patch.threads
       prefsStore.write(next)
       if (!next.linkPreview) previews.clear()
       return next

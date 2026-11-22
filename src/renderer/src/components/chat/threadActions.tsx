@@ -78,16 +78,25 @@ export async function planThreadDelete(t: ThreadTarget, meId: string): Promise<D
   return { mine, others, rootMine }
 }
 
-export async function runThreadDelete(t: ThreadTarget, plan: DeletePlan, onProgress: (done: number) => void): Promise<{ deleted: number; failed: number }> {
+export interface DeleteResult {
+  deleted: number
+  failed: number
+  /** 첫 실패의 서버 사유 (예: "작성 후, 5분 이내에만 삭제할 수 있습니다.") */
+  reason?: string
+}
+
+export async function runThreadDelete(t: ThreadTarget, plan: DeletePlan, onProgress: (done: number) => void): Promise<DeleteResult> {
   let deleted = 0
   let failed = 0
+  let reason: string | undefined
   // 요청 제한을 생각해 하나씩
   for (const m of plan.mine) {
     try {
       await call('messenger:delete', t.threadChannelId, m.id)
       deleted++
-    } catch {
+    } catch (e) {
       failed++
+      reason ??= errorText(e)
     }
     onProgress(deleted + failed)
   }
@@ -95,12 +104,13 @@ export async function runThreadDelete(t: ThreadTarget, plan: DeletePlan, onProgr
     try {
       await call('messenger:delete', t.parentChannelId, t.root.id)
       deleted++
-    } catch {
+    } catch (e) {
       failed++
+      reason ??= errorText(e)
     }
     onProgress(deleted + failed)
   }
-  return { deleted, failed }
+  return { deleted, failed, reason }
 }
 
 /** 스레드 삭제 확인 창. 먼저 지울 수 있는 것을 세어 보여주고, 확인을 받은 뒤 지운다. */
@@ -116,7 +126,7 @@ export function ThreadDeleteDialog({
   title: string
   onClose: () => void
   /** removedAll: 남은 메시지가 없어 스레드가 사라졌을 것으로 보이는지 */
-  onDone: (r: { deleted: number; failed: number; hidden: boolean }) => void
+  onDone: (r: DeleteResult & { hidden: boolean }) => void
 }) {
   const [plan, setPlan] = useState<DeletePlan | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -143,7 +153,8 @@ export function ThreadDeleteDialog({
     setBusy(true)
     try {
       const r = await runThreadDelete(target, plan, setProgress)
-      const hidden = leftover > 0 && hideToo
+      // 남는 메시지가 있거나 지우지 못한 게 있으면 (체크돼 있을 때) 목록에서 숨긴다
+      const hidden = (leftover > 0 || r.failed > 0) && hideToo
       if (hidden) setThreadHidden(target.threadChannelId, true)
       onDone({ ...r, hidden })
     } finally {
@@ -183,9 +194,9 @@ export function ThreadDeleteDialog({
             ) : (
               <p className="muted small">모두 내 메시지라 지우면 스레드가 비게 됩니다. 되돌릴 수 없습니다.</p>
             )}
-            {leftover > 0 && (
+            {total > 0 && (
               <label className="check-row small">
-                <input type="checkbox" checked={hideToo} onChange={(e) => setHideToo(e.target.checked)} /> 지운 뒤 내 스레드 목록에서도 숨기기 (이 컴퓨터만)
+                <input type="checkbox" checked={hideToo} onChange={(e) => setHideToo(e.target.checked)} /> 남는 메시지가 있으면 내 스레드 목록에서 숨기기 (이 컴퓨터만)
               </label>
             )}
             {busy && (
@@ -266,10 +277,19 @@ export function ThreadMenu({
   )
 }
 
-export function threadDeleteMessage(r: { deleted: number; failed: number; hidden: boolean }): string {
+export function threadDeleteMessage(r: DeleteResult & { hidden: boolean }): string {
   if (r.deleted === 0 && r.failed === 0) return r.hidden ? '스레드를 목록에서 숨겼습니다. "숨긴 스레드"에서 다시 볼 수 있습니다.' : '지운 메시지가 없습니다.'
   const parts = [`내 메시지 ${r.deleted}개를 지웠습니다.`]
-  if (r.failed) parts.push(`${r.failed}개는 지우지 못했습니다.`)
+  if (r.failed) parts.push(`${r.failed}개는 지우지 못했습니다${r.reason ? ` — ${deleteReasonHint(r.reason)}` : '.'}`)
   if (r.hidden) parts.push('다른 사람 메시지가 남아 스레드는 목록에서 숨겼습니다.')
   return parts.join(' ')
+}
+
+/** 서버 사유에 다음 할 일을 붙인다. 두레이는 조직 설정 "메시지 삭제 가능 시간"(기본 5분)이 지나면 지우지 못하게 한다 */
+export function deleteReasonHint(reason: string): string {
+  const r = reason.replace(/^DELETE \S+ 실패: /, '')
+  if (/분 이내에만 삭제|EXPIRED_DELETE_TIME/i.test(r)) {
+    return `${r} (두레이 관리자 설정의 메신저 메시지 삭제 가능 시간 때문입니다. 두레이 웹에서도 같습니다.)`
+  }
+  return r
 }

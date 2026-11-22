@@ -140,6 +140,10 @@ createServer(async (req, res) => {
   if ((m = p.match(/^\/messenger\/v1\/channels\/([^/]+)\/logs\/([^/]+)$/))) {
     const list = logs[m[1]] ?? []
     const i = list.findIndex((l) => l.id === m[2])
+    // 실제 두레이처럼 조직 설정 "메시지 삭제 가능 시간"(기본 5분)이 지나면 거절한다 (두레이 웹 번들의 CHANNEL_LOG_EXPIRED_DELETE_TIME_ERROR)
+    if (req.method === 'DELETE' && i >= 0 && Date.now() - Date.parse(list[i].sentAt) > 5 * 60_000) {
+      return send(400, { header: { isSuccessful: false, resultCode: -300107, resultMessage: encodeURIComponent('작성 후, 5분 이내에만 삭제할 수 있습니다.') }, result: null })
+    }
     if (req.method === 'DELETE' && i >= 0) list.splice(i, 1)
     if (req.method === 'PUT' && i >= 0) list[i].text = (await body(req)).text
     return send(200, ok(null))

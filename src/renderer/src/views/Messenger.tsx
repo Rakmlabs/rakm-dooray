@@ -29,7 +29,7 @@ import { FileDropArea } from '../components/files/FileDropArea'
 import { FileGallery } from '../components/files/FileGallery'
 import { Composer } from '../components/Composer'
 import { ThreadPanel, type OpenThread } from '../components/ThreadPanel'
-import { rememberReply } from '../components/chat/chatStore'
+import { rememberReply, useChatPrefs } from '../components/chat/chatStore'
 import { ChatIcon } from '../components/chat/ChatIcon'
 import { ThreadDeleteDialog, ThreadMenu, setThreadHidden, threadDeleteMessage, useHiddenThreads } from '../components/chat/threadActions'
 import { Modal } from '../components/Modal'
@@ -61,6 +61,7 @@ export function MessengerView({ active }: { active: boolean }) {
   const [thread, setThread] = useState<OpenThread | null>(null)
   const [filter, setFilter] = useState('')
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [chatPrefs] = useChatPrefs()
   /** 대화방을 열 때 받아 둔 "여기까지 읽음" 시각 */
   const [readMarker, setReadMarker] = useState<{ channelId: string; at: string | null } | null>(null)
   /** 검색·알림에서 온 메시지 위치 */
@@ -331,7 +332,7 @@ export function MessengerView({ active }: { active: boolean }) {
                     <span className="grow ellipsis">{s.title}</span>
                     {isCollapsed && sectionUnread > 0 ? <span className="badge">{sectionUnread}</span> : <span className="count">{list.length}</span>}
                   </button>
-                  {s.project && (
+                  {s.project && chatPrefs.threads && (
                     <>
                       <button
                         className="section-open"
@@ -429,10 +430,12 @@ export function MessengerView({ active }: { active: boolean }) {
         {!selection && (
           <div className="empty">
             <p>왼쪽에서 대화방을 고르거나 <kbd>⌘K</kbd> 로 찾아 가세요.</p>
-            <p className="muted small">
-              프로젝트(⌗ 버튼)를 만들어 대화방을 묶고, 대화는 “새 주제”로 스레드를 열어 주제별로 나누세요. 주제 제목 앞의 [프로젝트] 표시는 상대방 화면에서도
-              같은 프로젝트로 묶입니다.
-            </p>
+            {chatPrefs.threads && (
+              <p className="muted small">
+                프로젝트(⌗ 버튼)를 만들어 대화방을 묶고, 대화는 “새 주제”로 스레드를 열어 주제별로 나누세요. 주제 제목 앞의 [프로젝트] 표시는 상대방 화면에서도
+                같은 프로젝트로 묶입니다.
+              </p>
+            )}
             {recentThreads.length > 0 && (
               <div className="recent-threads">
                 <div className="qs-group">최근 연 스레드</div>
@@ -686,7 +689,10 @@ function ChannelPane({
   const { ui, toast, shell, updateShell } = useApp()
   const openThreadId = openThread?.threadChannelId ?? null
   const nameOf = useMemberNames()
-  const [tab, setTab] = useState<'chat' | 'threads'>('chat')
+  const [tabState, setTab] = useState<'chat' | 'threads'>('chat')
+  const [{ threads: threadsOn }] = useChatPrefs()
+  // 스레드 기능을 끄면 스레드 탭이 없다 (설정 › 채팅에서 켠다)
+  const tab = threadsOn ? tabState : 'chat'
   const [mode, setMode] = useState<ComposeMode>({ kind: 'normal' })
   const [newTopic, setNewTopic] = useState(false)
   const [gallery, setGallery] = useState(false)
@@ -763,6 +769,7 @@ function ChannelPane({
           <b>{title}</b>
           <span className="muted small"> · {channel.participantIds.length}명</span>
         </div>
+        {threadsOn && (
         <div className="tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'active' : ''} onClick={() => setTab('chat')}>
             대화
@@ -776,9 +783,12 @@ function ChannelPane({
             스레드 {threads.length > 0 && <span className="count">{threads.length}</span>}
           </button>
         </div>
-        <button className="primary small" onClick={() => setNewTopic(true)} title="프로젝트·제목을 붙여 스레드로 새 주제를 연다">
-          <Icon name="plus" size={14} /> 새 주제
-        </button>
+        )}
+        {threadsOn && (
+          <button className="primary small" onClick={() => setNewTopic(true)} title="프로젝트·제목을 붙여 스레드로 새 주제를 연다">
+            <Icon name="plus" size={14} /> 새 주제
+          </button>
+        )}
         <button
           className="icon-btn"
           onClick={() => openSearch({ scope: { channelId: channel.id, title } })}
@@ -819,7 +829,9 @@ function ChannelPane({
             meId={me?.id ?? null}
             onReply={(m) => setMode({ kind: 'reply', m })}
             onOpenThread={open}
-            onStartThread={(m) => onOpenThread({ threadChannelId: '', parentChannelId: channel.id, root: m, startFrom: true })}
+            onStartThread={
+              threadsOn ? (m) => onOpenThread({ threadChannelId: '', parentChannelId: channel.id, root: m, startFrom: true }) : undefined
+            }
             onChanged={() => void reload()}
             canLoadMore={canLoadMore}
             onLoadMore={loadMore}
