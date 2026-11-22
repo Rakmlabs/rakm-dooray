@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { TEST_BUILD } from './buildFlags'
 import type { PublicSettings, SecretSource, SettingsInput, UiState } from '@shared/types'
 import { parseDotEnv } from './dotenv'
 import { INVALID_TOKEN_MESSAGE, isValidToken } from './dooray/http'
@@ -14,8 +15,8 @@ import { INVALID_TOKEN_MESSAGE, isValidToken } from './dooray/http'
  */
 
 /** 이 앱은 한 회사(rakm)만 쓴다. 도메인과 API 주소(민간 클라우드)는 고정이고 설정에서 바꾸지 않는다. */
-export const DOORAY_DOMAIN = 'rakm.dooray.com'
-export const DOORAY_API_BASE = 'https://api.dooray.com'
+export { DOORAY_API_BASE, DOORAY_DOMAIN } from '@shared/company'
+import { DOORAY_API_BASE, DOORAY_DOMAIN } from '@shared/company'
 
 interface StoredSettings {
   dooray: { apiBase: string; domain: string }
@@ -80,6 +81,8 @@ function devEnv(): Record<string, string> {
  * 실제 토큰 없이 화면을 확인할 때만 쓴다.
  */
 export function mockBase(): string | null {
+  // 시험용 패키징 빌드는 빌드 때 박아 둔 모의 서버를 쓴다 (업데이트로 다시 켜져도 실제 두레이로 가지 않게)
+  if (TEST_BUILD) return TEST_BUILD.mockBase
   if (app.isPackaged) return null
   const v = process.env.DOORAY_MOCK_BASE
   return v && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(v) ? v : null

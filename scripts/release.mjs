@@ -8,29 +8,15 @@
 //   APPLE_SIGNING_IDENTITY 서명 인증서 이름 (예: "Developer ID Application: 이름 (팀ID)")
 // 값은 출력·로그에 남기지 않는다. 파일이나 항목이 없으면 공증만 건너뛰고 서명된 dmg/zip 을 만든다.
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { ENV_FILE, loadCredentials, quiet, signingEnv, writeUpdateInfo } from './lib/mac-build.mjs'
 
-const ENV_FILE = join(homedir(), '.config', 'sinawi', 'release.env')
-const KEYS = ['APPLE_API_KEY', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH', 'APPLE_SIGNING_IDENTITY']
 const OUT = 'release'
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
-
-function readEnvFile(path) {
-  const out = {}
-  if (!existsSync(path)) return out
-  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
-    const m = /^\s*(?:export\s+)?([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line)
-    if (m && !line.trim().startsWith('#')) out[m[1]] = m[2].replace(/^["']|["']$/g, '')
-  }
-  return out
-}
-// ~, $HOME, ${HOME} 처럼 셸 파일에 흔히 쓰는 경로 표기를 푼다
-const expandHome = (p) =>
-  (p || '')
-    .replace(/^~(?=\/|$)/, homedir())
-    .replace(/\$\{?([A-Z_][A-Z0-9_]*)\}?/g, (m, k) => (k === 'HOME' ? homedir() : (process.env[k] ?? m)))
+// 시험용 빌드 표시(모의 서버·로컬 피드)가 실제 배포본에 들어가지 않게 지운다 (src/main/buildFlags.ts)
+delete process.env.RAKM_TEST_BUILD
 
 // 명령과 인자를 보여주되, 비밀 값이 들어가는 인자는 가린다
 function run(cmd, args, { env, secretArgs = [] } = {}) {
@@ -42,31 +28,21 @@ function run(cmd, args, { env, secretArgs = [] } = {}) {
     process.exit(r.status ?? 1)
   }
 }
-function quiet(cmd, args) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8' })
-  return { ok: r.status === 0, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() }
-}
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64') {
   console.error('이 스크립트는 Apple Silicon Mac 에서만 돈다.')
   process.exit(1)
 }
 
-const fileVals = readEnvFile(ENV_FILE)
-const cfg = {}
-for (const k of KEYS) cfg[k] = process.env[k] || fileVals[k] || ''
-cfg.APPLE_API_KEY_PATH = expandHome(cfg.APPLE_API_KEY_PATH)
+const cfg = loadCredentials()
 console.log(existsSync(ENV_FILE) ? `자격 파일: ${ENV_FILE} (값은 표시하지 않음)` : `자격 파일 없음: ${ENV_FILE}`)
 
 // 서명 인증서: 키체인에 있는지만 확인 (이름은 출력하지 않음)
-const identities = quiet('security', ['find-identity', '-v', '-p', 'codesigning']).out
-const identity = cfg.APPLE_SIGNING_IDENTITY
-if (identity && !identities.includes(`"${identity}"`)) {
-  console.error('APPLE_SIGNING_IDENTITY 의 인증서가 이 Mac 키체인에 없습니다.')
-  process.exit(1)
-}
-if (!identity && !identities.includes('Developer ID Application:')) {
-  console.error('키체인에 Developer ID Application 인증서가 없습니다.')
+let env
+try {
+  env = signingEnv(cfg.APPLE_SIGNING_IDENTITY)
+} catch (e) {
+  console.error(e.message)
   process.exit(1)
 }
 
@@ -77,14 +53,7 @@ run('npx', ['tsc', '--noEmit', '-p', 'tsconfig.json'])
 run('npx', ['vitest', 'run'])
 run('npx', ['electron-vite', 'build'])
 
-// electron-builder 에 넘길 환경: 다른 자격 변수는 비우고, electron-builder 이름 규칙으로 다시 넣는다
-//   (electron-builder 의 APPLE_API_KEY 는 .p8 경로, APPLE_API_KEY_ID 는 키 ID)
-const env = { ...process.env }
-for (const k of ['APPLE_ID', 'APPLE_APP_SPECIFIC_PASSWORD', 'APPLE_TEAM_ID', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER', 'APPLE_API_KEY_PATH', 'APPLE_KEYCHAIN', 'APPLE_KEYCHAIN_PROFILE', 'APPLE_SIGNING_IDENTITY', 'CSC_LINK', 'CSC_KEY_PASSWORD', 'CSC_NAME']) delete env[k]
-if (identity) {
-  env.CSC_NAME = identity.replace(/^(Developer ID Application|Apple Development|Apple Distribution|Mac Developer|3rd Party Mac Developer Application):\s*/, '')
-  env.CSC_IDENTITY_AUTO_DISCOVERY = 'false'
-}
+// electron-builder 이름 규칙으로 공증 자격을 넣는다 (electron-builder 의 APPLE_API_KEY 는 .p8 경로, APPLE_API_KEY_ID 는 키 ID)
 if (canNotarize) {
   env.APPLE_API_KEY = cfg.APPLE_API_KEY_PATH
   env.APPLE_API_KEY_ID = cfg.APPLE_API_KEY
@@ -98,6 +67,10 @@ run('npx', ['electron-builder', '--mac', '--arm64', '--publish', 'never', ...(ca
 const files = readdirSync(OUT)
 const dmg = files.find((f) => f.endsWith('.dmg'))
 const zip = files.find((f) => f.endsWith('.zip'))
+if (!zip) {
+  console.error('자동 업데이트용 zip 을 찾지 못했습니다.')
+  process.exit(1)
+}
 const appDir = join(OUT, 'mac-arm64', `${pkg.build.productName}.app`)
 if (!dmg || !existsSync(appDir)) {
   console.error('dmg 또는 .app 을 찾지 못했습니다.')
@@ -111,18 +84,36 @@ if (canNotarize) {
   run('xcrun', ['stapler', 'staple', join(OUT, dmg)])
 }
 
+// 자동 업데이트가 받을 zip 안의 앱도 서명·공증(staple)됐는지 풀어서 확인한다
+const unz = mkdtempSync(join(tmpdir(), 'rakm-zip-'))
+run('ditto', ['-x', '-k', join(OUT, zip), unz])
+const zipApp = join(unz, `${pkg.build.productName}.app`)
+
+// 자동 업데이트 정보: 최종 zip·dmg 로 계산한다 (위에서 dmg 를 staple 했으므로 그 뒤에)
+await writeUpdateInfo(OUT, pkg.version, zip, dmg)
+
 console.log('\n=== 검증 ===')
+let verifyFailed = false
 for (const [name, cmd, args] of [
   ['codesign (app)', 'codesign', ['--verify', '--deep', '--strict', appDir]],
   ['spctl (app)', 'spctl', ['-a', '-vv', appDir]],
   ['stapler (app)', 'xcrun', ['stapler', 'validate', appDir]],
   ['codesign (dmg)', 'codesign', ['--verify', join(OUT, dmg)]],
   ['spctl (dmg)', 'spctl', ['-a', '-vv', '-t', 'open', '--context', 'context:primary-signature', join(OUT, dmg)]],
-  ['stapler (dmg)', 'xcrun', ['stapler', 'validate', join(OUT, dmg)]]
+  ['stapler (dmg)', 'xcrun', ['stapler', 'validate', join(OUT, dmg)]],
+  ['codesign (zip 안 app)', 'codesign', ['--verify', '--deep', '--strict', zipApp]],
+  ['spctl (zip 안 app)', 'spctl', ['-a', '-vv', zipApp]],
+  ['stapler (zip 안 app)', 'xcrun', ['stapler', 'validate', zipApp]]
 ]) {
   const r = quiet(cmd, args)
+  if (!r.ok && (canNotarize || !/spctl|stapler/.test(name))) verifyFailed = true
   console.log(`- ${name}: ${r.ok ? '통과' : '실패'}\n  ${r.out.split('\n').join('\n  ')}`)
 }
 const mb = (f) => `${(statSync(join(OUT, f)).size / 1024 / 1024).toFixed(1)} MB`
-console.log(`\n산출물:\n- ${join(OUT, dmg)} (${mb(dmg)})${zip ? `\n- ${join(OUT, zip)} (${mb(zip)})` : ''}`)
+rmSync(unz, { recursive: true, force: true })
+console.log(`\n산출물 (릴리스에 셋 다 올린다. zip·latest-mac.yml 은 자동 업데이트용):\n- ${join(OUT, dmg)} (${mb(dmg)})\n- ${join(OUT, zip)} (${mb(zip)})\n- ${join(OUT, 'latest-mac.yml')}`)
+if (verifyFailed) {
+  console.error('\n검증 실패: 위에서 "실패" 항목을 확인하세요. 이 산출물은 올리지 말 것.')
+  process.exit(1)
+}
 console.log(canNotarize ? '공증: 완료 (app·dmg staple)' : '공증: 안 됨 — 처음 열 때 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기" 필요')

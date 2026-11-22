@@ -1,16 +1,16 @@
 import { useState } from 'react'
 import type { SecretSource, TestResult } from '@shared/types'
 import { call, errorText } from '../api'
+import { TOKEN_URL } from '@shared/company'
 import { useApp } from '../state'
 import { ChatSettings } from '../components/chat/ChatSettings'
 import { FileSettings } from '../components/files/FileSettings'
 import { ReceiptsSettings } from '../components/ReceiptsSettings'
+import { UpdateSettings } from '../components/UpdateSettings'
 import { AppearanceSettings, NotificationSettings, Shortcuts, StorageSettings, WindowSettings } from '../shell/ShellSettings'
 
 /** 새 버전은 여기서 내려받는다 (비공개 저장소라 자동 업데이트는 하지 않는다) */
-const RELEASES_URL = 'https://github.com/Rakmlabs/rakm-dooray/releases'
 /** 개인 API 토큰 발급 화면 (두레이 웹) */
-const TOKEN_URL = 'https://rakm.dooray.com/setting/api/token'
 
 // 메일 설정(IMAP/SMTP)은 지금 쓰지 않아 화면에서 뺐다 (Free 플랜이라 IMAP 불가). main 쪽 코드와 IPC 는 남아 있다.
 
@@ -68,12 +68,7 @@ export function SettingsView() {
       <p className="muted">
         <b>{settings.dooray.domain}</b> 에 연결합니다. 토큰은 OS 키체인으로 암호화해 이 컴퓨터에만 저장합니다.
       </p>
-      <p className="muted small">
-        버전 {__APP_VERSION__} ·{' '}
-        <button type="button" className="link" onClick={() => void call('shell:openExternal', RELEASES_URL)}>
-          새 버전 내려받기 (GitHub 릴리스)
-        </button>
-      </p>
+      <UpdateSettings />
       {!settings.secureStorage && (
         <div className="banner banner-warn">
           이 컴퓨터에서 OS 키체인 암호화를 쓸 수 없어 토큰을 저장할 수 없습니다. (리눅스라면 GNOME Keyring 이나 KWallet 이 필요합니다.)

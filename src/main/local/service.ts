@@ -10,6 +10,7 @@ import { dataDir, jsonStore } from '../store'
 import { mockBase } from '../settings'
 import { LocalArchive, previewText } from './archive'
 import { normalizeState, notifiable } from './rules'
+import type { NotifyPermissionTracker } from './notify-permission'
 
 /**
  * 셸 영역의 main 쪽 두뇌.
@@ -28,6 +29,8 @@ export interface ShellDeps {
   /** 창을 띄운다 (없으면 만든다). 다 뜬 뒤 resolve */
   showWindow: () => Promise<void>
   onStateApplied: (s: ShellState) => void
+  /** 알림 권한 (알림을 보낸 결과로 판단) */
+  permission: NotifyPermissionTracker
 }
 
 // 모의 서버로 화면을 확인할 때(개발 전용)는 빨리 돈다
@@ -137,6 +140,8 @@ export class ShellService {
     try {
       this.me = await this.deps.messenger.me()
       this.memberCache.set(this.me.id, this.me)
+      // 토큰이 확인됐다: 아직 알림 권한을 물은 적이 없으면 지금 묻는다 (안 읽은 메시지가 생길 때까지 기다리지 않는다)
+      if (this.state.prefs.notify.enabled) this.deps.permission.askOnce()
     } catch {
       return null
     }
@@ -330,17 +335,18 @@ export class ShellService {
       void this.deps.showWindow().then(() => this.deps.emit('shell:navigate', { kind: 'channel', channelId, messageId: last.id }))
     })
     n.on('close', () => this.notifications.delete(n))
-    n.show()
+    n.on('failed', () => this.notifications.delete(n))
+    void this.deps.permission.show(n)
   }
 
-  testNotification(): void {
+  testNotification() {
     if (!Notification.isSupported()) throw new Error('이 컴퓨터에서는 데스크톱 알림을 쓸 수 없습니다.')
     const n = new Notification({
-      title: 'RAKM 두레이',
+      title: app.getName(),
       body: this.state.prefs.notify.preview ? '알림이 이렇게 보입니다.' : '새 메시지',
       silent: !this.state.prefs.notify.sound
     })
-    n.show()
+    return this.deps.permission.show(n)
   }
 
   // ---------- 뒤에서 훑기 ----------

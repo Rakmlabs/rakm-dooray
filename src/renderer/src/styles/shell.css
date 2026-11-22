@@ -358,3 +358,14 @@
   border: 0;
   box-shadow: none;
 }
+
+/* 자동 업데이트: 새 버전을 다 받았을 때 화면 위 띠 */
+.update-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 13px;
+  background: var(--accent-weak);
+  border-bottom: 1px solid var(--line);
+}

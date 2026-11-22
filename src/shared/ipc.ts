@@ -22,6 +22,7 @@ import { FILES_AREA_CHANNELS, FILES_AREA_EVENTS, type FilesAreaContract, type Fi
 import { CHAT_AREA_CHANNELS, CHAT_AREA_EVENTS, type ChatAreaContract, type ChatAreaEvents } from './ipc-chat'
 import { SHELL_AREA_CHANNELS, SHELL_AREA_EVENTS, type ShellAreaContract, type ShellAreaEvents } from './ipc-shell'
 import { RECEIPTS_AREA_CHANNELS, RECEIPTS_AREA_EVENTS, type ReceiptsAreaContract, type ReceiptsAreaEvents } from './ipc-receipts'
+import { UPDATES_AREA_CHANNELS, UPDATES_AREA_EVENTS, type UpdatesAreaContract, type UpdatesAreaEvents } from './ipc-updates'
 
 /**
  * renderer → main 요청 목록. 키가 IPC 채널 이름이다.
@@ -89,7 +90,7 @@ interface CoreContract {
 }
 
 /** 기본 계약 + 영역별 계약(ipc-wiki/files/chat/shell.ts) */
-export interface IpcContract extends CoreContract, WikiAreaContract, FilesAreaContract, ChatAreaContract, ShellAreaContract, ReceiptsAreaContract {}
+export interface IpcContract extends CoreContract, WikiAreaContract, FilesAreaContract, ChatAreaContract, ShellAreaContract, ReceiptsAreaContract, UpdatesAreaContract {}
 
 export type IpcChannel = keyof IpcContract
 
@@ -98,7 +99,7 @@ interface CoreEvents {
   'realtime:status': RealtimeStatus
   'messenger:activity': MessengerActivity
 }
-export interface IpcEvents extends CoreEvents, WikiAreaEvents, FilesAreaEvents, ChatAreaEvents, ShellAreaEvents, ReceiptsAreaEvents {}
+export interface IpcEvents extends CoreEvents, WikiAreaEvents, FilesAreaEvents, ChatAreaEvents, ShellAreaEvents, ReceiptsAreaEvents, UpdatesAreaEvents {}
 
 export type IpcEventName = keyof IpcEvents
 
@@ -156,7 +157,8 @@ export const IPC_CHANNELS: IpcChannel[] = [
   ...FILES_AREA_CHANNELS,
   ...CHAT_AREA_CHANNELS,
   ...SHELL_AREA_CHANNELS,
-  ...RECEIPTS_AREA_CHANNELS
+  ...RECEIPTS_AREA_CHANNELS,
+  ...UPDATES_AREA_CHANNELS
 ]
 
 export const IPC_EVENTS: IpcEventName[] = [
@@ -166,6 +168,7 @@ export const IPC_EVENTS: IpcEventName[] = [
   ...FILES_AREA_EVENTS,
   ...CHAT_AREA_EVENTS,
   ...SHELL_AREA_EVENTS,
-  ...RECEIPTS_AREA_EVENTS
+  ...RECEIPTS_AREA_EVENTS,
+  ...UPDATES_AREA_EVENTS
 ]
 

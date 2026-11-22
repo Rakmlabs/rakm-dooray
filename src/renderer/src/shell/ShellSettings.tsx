@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Channel } from '@shared/types'
-import type { IndexStatus, ShellPrefs } from '@shared/types-shell'
-import { call, errorText } from '../api'
+import type { IndexStatus, NotifyPermission, ShellPrefs } from '@shared/types-shell'
+import { call, errorText, onEvent } from '../api'
 import { useApp, useMemberNames } from '../state'
 import { channelTitle } from '../lib/projects'
 
@@ -79,17 +79,40 @@ export function NotificationSettings() {
   const { toast } = useApp()
   const nameOf = useMemberNames()
   const [channels, setChannels] = useState<Channel[]>([])
+  const [perm, setPerm] = useState<NotifyPermission | null>(null)
+  const [testing, setTesting] = useState(false)
   useEffect(() => {
     call('shell:quickData')
       .then((d) => setChannels(d.channels))
       .catch(() => {})
+    call('shell:notifyPermission').then(setPerm).catch(() => {})
+    return onEvent('shell:notifyPermission', setPerm)
   }, [])
   if (!prefs) return null
   const n = prefs.notify
+  const test = () => {
+    setTesting(true)
+    call('shell:testNotification')
+      .then((p) => {
+        setPerm(p)
+        if (p.state === 'allowed') toast('알림을 보냈습니다. 화면 오른쪽 위에 보이면 정상입니다.')
+      })
+      .catch((e) => toast(errorText(e)))
+      .finally(() => setTesting(false))
+  }
   const setN = (fn: (x: ShellPrefs['notify']) => ShellPrefs['notify']) => set((p) => ({ ...p, notify: fn(p.notify) }))
   return (
     <div className="card" id="notify-settings">
       <h2>알림</h2>
+      {perm?.state === 'denied' && (
+        <div className="banner banner-warn notify-off" role="alert">
+          <strong>알림이 꺼져 있음</strong> · {perm.detail}
+          <button type="button" className="link" onClick={() => void call('shell:openNotificationSettings')}>
+            시스템 설정 열기
+          </button>
+        </div>
+      )}
+      {perm && perm.state !== 'denied' && perm.state !== 'allowed' && perm.detail && <div className="banner banner-warn notify-off">{perm.detail}</div>}
       <Toggle
         checked={n.enabled}
         onChange={(enabled) => setN((x) => ({ ...x, enabled }))}
@@ -116,19 +139,19 @@ export function NotificationSettings() {
         )}
       </div>
       <div className="row">
-        <button
-          type="button"
-          onClick={() =>
-            void call('shell:testNotification').catch((e) => {
-              toast(errorText(e))
-            })
-          }
-        >
-          알림 시험
+        <button type="button" onClick={test} disabled={testing}>
+          알림 테스트
+        </button>
+        <button type="button" className="link" onClick={() => void call('shell:openNotificationSettings')}>
+          시스템 알림 설정
         </button>
         <small className="muted">
-          macOS 에서 알림이 안 보이면 시스템 설정 &gt; 알림 에서 이 앱을 허용하세요. 안 읽은 수는 이 컴퓨터에서 계산한 값입니다 (두레이에는 읽음 정보를 주는 API 가
-          없습니다).
+          {perm?.state === 'allowed'
+            ? `알림 켜짐${perm.checkedAt ? ` (마지막 확인 ${new Date(perm.checkedAt).toLocaleString('ko-KR')})` : ''}.`
+            : perm?.state === 'asked'
+              ? '처음 알림을 보내면 macOS 가 허용할지 묻습니다. "허용"을 눌러야 알림·배지가 보입니다.'
+              : '알림이 안 보이면 "알림 테스트"를 눌러 보세요.'}{' '}
+          안 읽은 수는 이 컴퓨터에서 계산한 값입니다 (두레이에는 읽음 정보를 주는 API 가 없습니다).
         </small>
       </div>
     </div>

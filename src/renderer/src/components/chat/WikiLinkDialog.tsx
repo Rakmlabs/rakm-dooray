@@ -4,11 +4,12 @@ import { useApp } from '../../state'
 import { wikiPageUrl } from '../../lib/markdown'
 import { Modal } from '../Modal'
 import { WikiPagePicker, type PickedPage } from './WikiPagePicker'
+import { DOORAY_DOMAIN } from '@shared/company'
 
 export function WikiLinkDialog({ onPick, onClose }: { onPick: (markdown: string) => void; onClose: () => void }) {
   const { settings } = useApp()
   const [target, setTarget] = useState<PickedPage | null>(null)
-  const domain = settings?.dooray.domain ?? 'rakm.dooray.com'
+  const domain = settings?.dooray.domain ?? DOORAY_DOMAIN
   const insert = () => {
     if (!target?.page) return
     const title = target.page.subject.replace(/[[\]]/g, '') || '위키 페이지'

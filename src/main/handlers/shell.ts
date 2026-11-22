@@ -3,6 +3,7 @@ import type { Message } from '@shared/types'
 import type { ShellAreaContract } from '@shared/ipc-shell'
 import type { ShellState } from '@shared/types-shell'
 import { ShellService } from '../local/service'
+import { NotifyPermissionTracker } from '../local/notify-permission'
 import type { HandlersFor, MainContext } from './types'
 
 /** index.ts 가 채운다 (창을 만드는 일은 index.ts 몫) */
@@ -16,6 +17,13 @@ let service: ShellService | null = null
 /** index.ts 의 기본 핸들러(메시지·위키 조회)가 받아 온 것을 보관함·색인에 넣을 때 쓴다 */
 export function shellService(): ShellService | null {
   return service
+}
+
+let tracker: NotifyPermissionTracker | null = null
+
+function permission(): NotifyPermissionTracker {
+  if (!tracker) throw new Error('앱이 아직 준비되지 않았습니다.')
+  return tracker
 }
 
 function need(): ShellService {
@@ -82,8 +90,10 @@ export function shellAreaHandlers(_ctx: MainContext): HandlersFor<ShellAreaContr
       void need().crawlWikis(true)
       return null
     },
-    'shell:testNotification': async () => {
-      need().testNotification()
+    'shell:testNotification': async () => need().testNotification(),
+    'shell:notifyPermission': async () => permission().get(),
+    'shell:openNotificationSettings': async () => {
+      permission().openSettings()
       return null
     },
     'shell:connection': async () => need().getConnection()
@@ -95,7 +105,9 @@ export function shellAreaBeforeReady(): void {}
 
 /** app ready 후, 창을 만들기 전에 한 번 (예: protocol.handle, 트레이). */
 export function shellAreaSetup(ctx: MainContext): void {
+  tracker = new NotifyPermissionTracker((p) => ctx.emit('shell:notifyPermission', p))
   service = new ShellService({
+    permission: tracker,
     messenger: ctx.messenger,
     wiki: ctx.wiki,
     emit: ctx.emit,

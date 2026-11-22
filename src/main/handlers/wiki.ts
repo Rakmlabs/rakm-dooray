@@ -123,6 +123,21 @@ export function wikiAreaHandlers(ctx: MainContext): HandlersFor<WikiAreaContract
 /** app ready 전에 한 번 (예: protocol.registerSchemesAsPrivileged). */
 export function wikiAreaBeforeReady(): void {}
 
+/** 보류 중인 위키 자동 저장을 지금 마무리하게 하고 끝날 때까지 기다린다 (최대 10초). 업데이트 재시작 전에 쓴다 */
+export function flushWikiSaves(ctx: MainContext): Promise<void> {
+  if (!pendingSave) return Promise.resolve()
+  pendingSave = false
+  return new Promise<void>((resolve) => {
+    const finish = () => {
+      if (flushWaiter === finish) flushWaiter = null
+      resolve()
+    }
+    flushWaiter = finish
+    setTimeout(finish, 10_000)
+    ctx.emit('wiki:flush', null)
+  })
+}
+
 /** 창을 닫기 전에 보류 중인 위키 저장을 마무리한다 (최대 10초 기다림). */
 function guardClose(ctx: MainContext, w: BrowserWindow): void {
   w.on('close', (e) => {

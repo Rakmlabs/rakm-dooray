@@ -14,14 +14,17 @@ import { applyLoginItem, savedBounds, trackWindow, TrayControl } from './local/w
 import { ZOOM } from './local/rules'
 import type { ShellState } from '@shared/types-shell'
 import type { MainContext } from './handlers/types'
-import { wikiAreaBeforeReady, wikiAreaHandlers, wikiAreaSetup } from './handlers/wiki'
-import { receiptsAreaHandlers, receiptsAreaSetup } from './handlers/receipts'
+import { flushWikiSaves, wikiAreaBeforeReady, wikiAreaHandlers, wikiAreaSetup } from './handlers/wiki'
+import { receiptsAreaHandlers, receiptsAreaSetup, receiptsFlush } from './handlers/receipts'
+import { updatesAreaHandlers, updatesAreaSetup } from './handlers/updates'
+import { TEST_BUILD } from './buildFlags'
 import { DOORAY_DOMAIN, getPublicSettings, getSecret, getSettings, getUiState, saveSettings, saveUiState } from './settings'
 
 // 이름을 바꾸면 userData 경로도 바뀌어 저장된 토큰·설정을 잃는다. 경로는 예전 이름(dooray-client)으로 고정하고 표시 이름만 바꾼다.
-if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), 'dooray-client'))
-app.setName('RAKM 두레이')
-const APP_TITLE = 'RAKM 두레이'
+// 시험용 패키징 빌드는 이름·userData 를 따로 써서 실제 앱의 토큰·데이터·키체인 항목과 섞이지 않는다 (buildFlags.ts)
+if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), TEST_BUILD?.userData ?? 'dooray-client'))
+app.setName(TEST_BUILD?.name ?? 'RAKM 두레이')
+const APP_TITLE = TEST_BUILD?.name ?? 'RAKM 두레이'
 const ICON_PATH = join(__dirname, '../../build/icon.png')
 
 let win: BrowserWindow | null = null
@@ -101,6 +104,7 @@ const handlers: Handlers = {
   ...chatAreaHandlers(ctx),
   ...shellAreaHandlers(ctx),
   ...receiptsAreaHandlers(ctx),
+  ...updatesAreaHandlers(ctx),
   'settings:get': () => getPublicSettings(),
   'settings:save': async (input) => {
     const r = await saveSettings(input)
@@ -331,6 +335,15 @@ for (const f of [wikiAreaBeforeReady, filesAreaBeforeReady, chatAreaBeforeReady,
 
 app.whenReady().then(() => {
   for (const f of [wikiAreaSetup, filesAreaSetup, chatAreaSetup, shellAreaSetup, receiptsAreaSetup]) f(ctx)
+  // 자동 업데이트: 재시작 전에 위키 자동 저장·읽음 위치 쓰기를 끝내고, 창 닫기를 숨기기가 아닌 종료로 처리한다
+  updatesAreaSetup(ctx, {
+    beforeRestart: async () => {
+      await Promise.all([flushWikiSaves(ctx), receiptsFlush()])
+    },
+    markQuitting: () => {
+      quitting = true
+    }
+  })
   // 개발 실행에서도 Dock 에 RAKM 아이콘이 보이게 한다 (패키징하면 electron-builder 가 build/icon.png 를 쓴다)
   if (process.platform === 'darwin' && !app.isPackaged) {
     const icon = nativeImage.createFromPath(ICON_PATH)

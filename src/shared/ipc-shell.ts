@@ -5,6 +5,7 @@ import type {
   HistoryPage,
   IndexStatus,
   NavTarget,
+  NotifyPermission,
   QuickData,
   SearchResult,
   ShellState,
@@ -31,7 +32,11 @@ export interface ShellAreaContract {
   'shell:lastWikiPage': { args: []; result: { wikiId: string; pageId: string } | null }
   'shell:indexStatus': { args: []; result: IndexStatus }
   'shell:reindexWiki': { args: []; result: null }
-  'shell:testNotification': { args: []; result: null }
+  /** 시험 알림을 보내고 결과(권한 상태)를 돌려준다. 처음이면 macOS 가 권한을 묻는다 */
+  'shell:testNotification': { args: []; result: NotifyPermission }
+  'shell:notifyPermission': { args: []; result: NotifyPermission }
+  /** 시스템 설정 > 알림 을 연다 */
+  'shell:openNotificationSettings': { args: []; result: null }
   'shell:connection': { args: []; result: ConnectionState }
 }
 
@@ -49,6 +54,8 @@ export const SHELL_AREA_CHANNELS: (keyof ShellAreaContract)[] = [
   'shell:indexStatus',
   'shell:reindexWiki',
   'shell:testNotification',
+  'shell:notifyPermission',
+  'shell:openNotificationSettings',
   'shell:connection'
 ]
 
@@ -61,6 +68,7 @@ export interface ShellAreaEvents {
   'shell:state': ShellState
   /** 창이 다시 앞에 와서 보고 있던 방을 읽음으로 바꿨을 때, 바꾸기 전 읽은 시각 ("여기까지 읽음" 위치) */
   'shell:readMarker': { channelId: string; readAt: string | null }
+  'shell:notifyPermission': NotifyPermission
 }
 
-export const SHELL_AREA_EVENTS: (keyof ShellAreaEvents)[] = ['shell:unread', 'shell:navigate', 'shell:connectionChanged', 'shell:state', 'shell:readMarker']
+export const SHELL_AREA_EVENTS: (keyof ShellAreaEvents)[] = ['shell:unread', 'shell:navigate', 'shell:connectionChanged', 'shell:state', 'shell:readMarker', 'shell:notifyPermission']

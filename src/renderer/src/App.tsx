@@ -13,6 +13,7 @@ import { navHistory } from './shell/history'
 import { onOpenSearch } from './shell/overlay'
 import { BookmarksPanel } from './components/chat/BookmarksPanel'
 import rakmTile from './assets/rakm-app-tile.png'
+import { UpdateBar } from './components/UpdateSettings'
 
 type Tab = 'messenger' | 'mail' | 'wiki' | 'settings'
 
@@ -190,6 +191,7 @@ export function App() {
         </button>
       </nav>
       <main className="workspace">
+        <UpdateBar />
         {!connection.online && (
           <div className="offline-bar" role="status">
             <Icon name="offline" size={15} /> {connection.detail || '연결이 끊겼습니다.'} 이 컴퓨터에 받아 둔 메시지는 계속 볼 수 있습니다.

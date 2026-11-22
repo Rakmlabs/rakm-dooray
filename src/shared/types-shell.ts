@@ -129,3 +129,23 @@ export interface ConnectionState {
   online: boolean
   detail: string
 }
+
+/**
+ * 데스크톱 알림 권한 (macOS 는 앱이 처음 알림을 만들 때 권한을 묻는다. Electron 에는 권한을 묻거나 조회하는 API 가 없어
+ * 알림을 보낸 결과(전달됨/거절됨)로 판단한다).
+ * - unknown: 아직 알림을 보낸 적이 없다
+ * - asked: 권한을 물었다 (시스템 창에서 고르기 전일 수 있음)
+ * - allowed: 마지막 알림이 전달됐다
+ * - denied: 시스템이 거절했다 (시스템 설정 > 알림에서 꺼져 있음)
+ * - unsupported: 이 실행에서는 알림을 쓸 수 없다 (서명 안 된 개발 실행 등)
+ */
+export type NotifyPermissionState = 'unknown' | 'asked' | 'allowed' | 'denied' | 'unsupported'
+
+export interface NotifyPermission {
+  state: NotifyPermissionState
+  detail: string
+  /** 마지막으로 알림을 보내 본 시각 */
+  checkedAt: string | null
+  /** 개발 실행(서명 안 된 Electron)이라 결과가 실제 앱과 다를 수 있음 */
+  dev: boolean
+}

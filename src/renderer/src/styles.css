@@ -1369,3 +1369,10 @@ hr {
   gap: 6px;
   font-size: 13px;
 }
+.notify-off {
+  margin: 0 0 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}

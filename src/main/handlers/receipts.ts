@@ -28,6 +28,11 @@ export function receiptsAreaHandlers(_ctx: MainContext): HandlersFor<ReceiptsAre
   }
 }
 
+/** 아직 쓰지 않은 읽음 위치를 지금 쓴다 (업데이트 재시작 전) */
+export function receiptsFlush(): Promise<void> {
+  return service?.flush() ?? Promise.resolve()
+}
+
 /** app ready 후 한 번 */
 export function receiptsAreaSetup(ctx: MainContext): void {
   service = new ReceiptsService({

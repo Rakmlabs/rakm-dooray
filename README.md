@@ -1,10 +1,25 @@
 # RAKM 두레이 (dooray-client)
 
-RAKM 전용 NHN Dooray 데스크톱 클라이언트 (메신저, 위키). Electron + React + TypeScript.
-연결 대상은 코드에 고정돼 있다: 회사 도메인 `rakm.dooray.com`, API `https://api.dooray.com` (`src/main/settings.ts`).
+> **두레이(Dooray!) 비공식 데스크톱 클라이언트입니다. NHN 및 NHN Dooray 와 무관하며, NHN 이 만들거나 보증하지 않습니다.**
+> 두레이의 공개 API 와 각자 발급한 개인 API 토큰으로 동작합니다. 두레이 로고·상표는 쓰지 않습니다 (아이콘은 RAKM 마크).
+
+RAKM 에서 쓰려고 만든 NHN Dooray 데스크톱 클라이언트 (메신저, 위키). Electron + React + TypeScript. macOS (Apple Silicon) 용.
+연결 대상은 코드에 고정돼 있다: 회사 도메인 `rakm.dooray.com`, API `https://api.dooray.com` (`src/shared/company.ts` 한 곳).
 메일(IMAP/SMTP) 코드는 남아 있지만 Free 플랜이라 IMAP 을 쓸 수 없어 화면에서는 숨겼다 (`src/renderer/src/App.tsx` 의 TABS).
-로고·아이콘은 회사 사이트 저장소(rakm-site)의 R 마크 원본 `docs/brand/favicon-source-r.png` 로 만든다: 파란 판(#2f6bff, 1024 캔버스 안 824 판, 모서리 반경 185, 옅은 그림자) 위에 흰 R. `build/icon.png`·`icon.icns`·`icon.ico`(앱·Dock 아이콘), `src/renderer/src/assets/rakm-app-tile.png`(사이드바).
+로고·아이콘은 RAKM 의 R 마크로 만든다: 파란 판(#2f6bff, 1024 캔버스 안 824 판, 모서리 반경 185, 옅은 그림자) 위에 흰 R. `build/icon.png`·`icon.icns`·`icon.ico`(앱·Dock 아이콘), `src/renderer/src/assets/rakm-app-tile.png`(사이드바).
 서버 없이 각자 자기 컴퓨터에 토큰을 넣어 쓴다. 네트워크 호출은 전부 main 프로세스에서 하고, 화면(renderer)은 IPC 로만 받는다.
+
+## 설치 (사용자)
+
+1. [Releases](https://github.com/Rakmlabs/rakm-dooray/releases/latest) 에서 `RAKM-Dooray-<버전>-arm64.dmg` 를 내려받는다 (Apple Silicon Mac, macOS 12 이상).
+2. dmg 를 열고 `RAKM Dooray` 를 **응용 프로그램(Applications)** 폴더로 끌어 놓는다. Developer ID 서명·Apple 공증을 받아 바로 열린다.
+3. 처음 켜면 설정 화면이 뜬다. **각자 자기 두레이 개인 API 토큰**을 발급해 붙여 넣는다:
+   두레이 웹 → 오른쪽 위 프로필 → **개인 설정 > API > 개인 인증 토큰** 에서 "토큰 생성" (설정 화면의 "여기서 발급" 버튼이 이 화면을 연다).
+   토큰은 이 Mac 의 키체인으로 암호화해 이 컴퓨터에만 저장한다. 다른 사람과 공유하지 말 것.
+4. 처음 켜면 macOS 가 **알림 허용**을 묻는다. "허용"을 눌러야 새 메시지 알림이 뜬다 (나중에는 시스템 설정 > 알림 > RAKM 두레이).
+5. 0.1.3 부터는 새 버전이 나오면 앱이 알아서 받아 "새 버전 준비됨 · 재시작" 띠를 띄운다 (0.1.2 이하에서 올 때는 0.1.3 을 한 번 직접 설치).
+
+라이선스: 정하지 않음.
 
 API 조사 결과와 근거는 [docs/API_RESEARCH.md](docs/API_RESEARCH.md) 에 있다.
 
@@ -89,16 +104,19 @@ DOORAY_MOCK_BASE=http://127.0.0.1:8787 npm run dev   # 메신저·위키가 가�
 
 ## 배포 (macOS, Apple Silicon)
 
-자동 업데이트와 CI 는 없다. 이 Mac 에서 `npm run release` 한 줄로 만들고, GitHub 릴리스에 올린다.
-설정 화면에 현재 버전과 릴리스 페이지 링크가 있어, 새 버전은 거기서 내려받아 덮어쓴다.
+CI 는 없다. 이 Mac 에서 `npm run release` 한 줄로 만들고, GitHub 릴리스에 올린다.
 
 `npm run release` (`scripts/release.mjs`) 가 하는 일:
-1. 타입 검사, 단위 테스트, `electron-vite build`
+1. 타입 검사, 단위 테스트, `electron-vite build` (시험 빌드 표시 `RAKM_TEST_BUILD` 는 지우고 빌드한다)
 2. `electron-builder --mac --arm64`: Developer ID 로 서명(hardened runtime, `build/entitlements.mac.plist`), `.app` 공증·staple, dmg·zip 생성
 3. dmg 도 공증하고 staple
-4. `codesign --verify --deep --strict`, `spctl -a -vv`, `stapler validate` 결과와 파일 크기 출력
+4. **자동 업데이트 정보 `latest-mac.yml`** 을 최종 zip·dmg 로 계산해 만든다 (sha512·크기)
+5. `.app`, dmg, **zip 을 풀어 그 안의 앱**까지 `codesign --verify --deep --strict`, `spctl -a -vv`, `stapler validate` 하고, 하나라도 실패하면 멈춘다
 
-산출물은 `release/RAKM-Dooray-<버전>-arm64.dmg`, `.zip` (git 에는 안 올라간다).
+산출물은 `release/` 의 세 파일이고 셋 다 릴리스에 올린다 (git 에는 안 올라간다):
+- `RAKM-Dooray-<버전>-arm64.dmg` — 처음 설치용
+- `RAKM-Dooray-<버전>-arm64.zip` — 자동 업데이트가 받는 것 (서명·공증·staple 된 앱)
+- `latest-mac.yml` — 자동 업데이트가 "새 버전이 있는지" 읽는 것
 
 앱 번들 이름은 `RAKM Dooray.app` (영문)이고 화면에 보이는 이름만 `RAKM 두레이` 다 (`CFBundleDisplayName`, `app.setName`).
 `productName` 이나 `CFBundleName` 에 한글을 넣으면 Electron 이 helper 앱을 찾지 못해 실행하자마자 죽는다(SIGTRAP) — 바꾸지 말 것.
@@ -106,21 +124,48 @@ DOORAY_MOCK_BASE=http://127.0.0.1:8787 npm run dev   # 메신저·위키가 가�
 **자격**은 저장소 밖 `~/.config/sinawi/release.env` (권한 600) 에서 실행할 때만 읽는다. 이미 설정된 환경 변수가 먼저다.
 항목 이름: `APPLE_API_KEY`(App Store Connect API 키 ID), `APPLE_API_ISSUER`, `APPLE_API_KEY_PATH`(`.p8` 경로), `APPLE_SIGNING_IDENTITY`(서명 인증서 이름).
 값은 저장소·로그에 넣지 않는다. 파일이 없으면 공증을 건너뛰고 그렇다고 알린다 — 그 빌드는 처음 열 때
-"시스템 설정 > 개인정보 보호 및 보안 > 그래도 열기" 가 필요하다.
+"시스템 설정 > 개인정보 보호 및 보안 > 그래도 열기" 가 필요하고, 자동 업데이트로 배포하면 안 된다.
 
 **버전 올려 배포하는 순서**
 
 ```sh
-npm version 0.2.0 --no-git-tag-version          # package.json 버전 (설정 화면 표시도 이 값)
+npm version 0.2.0 --no-git-tag-version          # package.json 버전 (앱 버전·업데이트 비교 기준)
 git commit -am "chore: v0.2.0"
-npm run release                                 # 마지막 줄에 '공증: 완료' 와 spctl 'Notarized Developer ID' 확인
+npm run release                                 # '공증: 완료', zip 안 앱의 spctl 'Notarized Developer ID' 확인
 git tag v0.2.0 && git push origin main v0.2.0
-gh release create v0.2.0 release/RAKM-Dooray-0.2.0-arm64.dmg release/RAKM-Dooray-0.2.0-arm64.zip \
-  --repo Rakmlabs/rakm-dooray --title "RAKM 두레이 0.2.0" --notes "바뀐 점 …"
+gh release create v0.2.0 release/RAKM-Dooray-0.2.0-arm64.dmg release/RAKM-Dooray-0.2.0-arm64.zip release/latest-mac.yml \
+  release/*.blockmap --repo Rakmlabs/rakm-dooray --title "RAKM 두레이 0.2.0" --notes "바뀐 점 …" --latest
 ```
 
-받는 사람: dmg 를 열어 앱을 "응용 프로그램" 으로 끌어 놓고 실행 → 설정에서 자기 두레이 개인 API 토큰 입력.
-데이터 폴더는 개발·배포 빌드 모두 `~/Library/Application Support/dooray-client` 라 새 버전을 덮어써도 토큰과 받아 둔 메시지가 남는다.
+받는 사람: 처음 한 번은 dmg 를 열어 앱을 "응용 프로그램" 으로 끌어 놓고 실행 → 설정에서 자기 두레이 개인 API 토큰 입력.
+데이터 폴더는 개발·배포 빌드 모두 `~/Library/Application Support/dooray-client` 라 새 버전이 들어와도 토큰과 받아 둔 메시지가 남는다.
+
+### 자동 업데이트
+
+- `electron-updater` (맥은 Squirrel.Mac). 앱을 켜고 15초 뒤, 그 뒤 4시간마다 `latest-mac.yml` 을 확인하고 새 버전 zip 을 뒤에서 받는다.
+- 다 받으면 화면 위에 "새 버전 x.y.z 준비됨 · 재시작" 띠가 뜨고, 설정 > 업데이트에도 같은 버튼이 있다.
+  재시작 전에 보류 중인 위키 자동 저장과 읽음 위치 쓰기를 끝낸다. 재시작하지 않으면 다음에 앱을 끌 때 설치된다.
+- 받은 zip 은 Squirrel.Mac 이 **지금 앱과 같은 Developer ID(팀) 서명인지** 확인한 뒤에만 바꿔 끼운다 (끄지 않는다). 피드에는 서명·공증된 zip 만 올린다.
+- 오류는 화면에 띄우지 않고 `userData/logs/updates.log` 에 남긴다. 설정 > 업데이트에 마지막 확인 시각·결과와 "지금 확인" 버튼이 있다.
+- 개발 실행(`npm run dev`)에서는 확인하지 않는다.
+- **피드 위치는 `src/main/updates/feed.ts` 의 `UPDATE_FEED` 한 곳**에서 정한다: 이 저장소의 GitHub 릴리스 (electron-updater `github` provider, 토큰 없음 — 공개 저장소라야 한다).
+  릴리스에 zip·dmg·`latest-mac.yml`·blockmap 이 있어야 하고, 최신(latest)으로 표시된 릴리스를 본다. 앱에는 토큰·비밀 값을 넣지 않는다.
+
+### 시험 빌드 (알림 권한·자동 업데이트 확인용)
+
+알림 권한과 자동 업데이트는 **서명된 패키징 앱**에서만 실제처럼 동작한다 (개발 실행은 서명 안 된 `Electron.app` 이라 macOS 가 알림을 막는다).
+실제 앱과 섞이지 않는 시험 빌드를 만든다:
+
+```sh
+node scripts/test-build.mjs --version 0.0.1 --out /tmp/tb/v1 --mock http://127.0.0.1:8790 --feed http://127.0.0.1:8791/feed
+node scripts/test-build.mjs --version 0.0.2 --out /tmp/tb/v2 --mock http://127.0.0.1:8790 --feed http://127.0.0.1:8791/feed
+```
+
+- 번들 ID `kr.co.rakm.dooray.test`, 이름 `RAKM 두레이 시험`, 데이터 `~/Library/Application Support/dooray-client-test`, 키체인 항목도 따로 →
+  소유자 앱의 토큰·데이터·알림 권한을 건드리지 않는다. 모의 서버·피드 주소(로컬만)를 빌드에 박는다 (업데이트로 다시 켜질 때 실행 인자가 사라지므로).
+- 서명은 하고 공증은 안 한다. **`~/Applications` 처럼 정식 앱 폴더에 두고 `open` 으로 연다** — 임시 폴더(`/tmp`)에 둔 앱은 macOS 가 알림 권한 요청을 거절한다.
+- 업데이트 흐름: `node scripts/mock-dooray.mjs` (PORT=8790) 와 아무 정적 서버로 `/feed/` 에 v2 의 `latest-mac.yml`·zip 을 두고, v1 을 켜면
+  확인 → 받기 → "준비됨" 띠 → 재시작 → 0.0.2 로 다시 켜진다.
 
 ## 구조
 

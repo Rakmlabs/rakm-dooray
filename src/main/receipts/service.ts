@@ -141,6 +141,22 @@ export class ReceiptsService {
     this.save()
   }
 
+  /** 아직 쓰지 않은 읽은 위치가 있으면 30초 간격을 기다리지 않고 지금 쓴다 (업데이트 재시작 전). 실패는 무시 */
+  async flush(timeoutMs = 10_000): Promise<void> {
+    if (!this.dirtySince || !this.cfg.enabled || this.state !== 'ready') return
+    const until = this.now() + timeoutMs
+    while (this.busy && this.now() < until) await this.sleep(100)
+    if (!this.dirtySince || this.busy) return
+    this.busy = true
+    try {
+      await this.writeMine(false)
+    } catch {
+      /* 다음에 다시 쓴다 */
+    } finally {
+      this.busy = false
+    }
+  }
+
   setRendererFocused(v: boolean): void {
     this.rendererFocused = v
   }
