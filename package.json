@@ -1,6 +1,6 @@
 {
   "name": "dooray-client",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "RAKM 두레이 — NHN Dooray 커스텀 데스크톱 클라이언트 (메신저, 위키)",
   "main": "out/main/index.js",
