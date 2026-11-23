@@ -57,11 +57,21 @@ function init(state) {
   logs['c-dm2'] = [log('c-dm2', 'm-dev', '배포 스크립트 리뷰 부탁드려요', 5_400_000)]
   // 1500개 기록: 30일 전부터 25분 간격
   const hist = []
+  // seq 는 1,000,000 부터: 성능 측정 때 scripts/bench/seed-archive.mjs 가 그보다 작은 seq 로 오래된 기록 수만 개를 보관함에 미리 넣는다
   for (let i = 0; i < 1500; i++) {
     const who = i % 3 === 0 ? ME : 'm-co'
     const n = i + 1
-    const text = n % 100 === 0 ? `[기록] ${n}번째 메시지 — 분기 회고 메모` : `기록 메시지 ${n}`
-    hist.push(log('c-history', who, text, (1500 - i) * 25 * 60_000 + 30_000))
+    const text =
+      n % 100 === 0
+        ? `[기록] ${n}번째 메시지 — 분기 회고 메모`
+        : n % 9 === 0
+          ? `기록 메시지 ${n} — 설정은 이렇게\n\`\`\`ts\nexport const retry = ${n % 5}\nexport function wait(ms: number) {\n  return new Promise((r) => setTimeout(r, ms))\n}\n\`\`\``
+          : n % 4 === 0
+            ? `기록 메시지 ${n}: 회의에서 나온 이야기를 길게 정리합니다. 배포 일정, QA 범위, 고객 문의 대응, 다음 분기 목표까지 한 번에 적어 둡니다.`
+            : `기록 메시지 ${n}`
+    const l = { ...log('c-history', who, text, (1500 - i) * 25 * 60_000 + 30_000), seq: 1_000_000 + i }
+    if (n % 13 === 0) Object.assign(l, { type: 'FILE', text: '', file: { id: ['f-img1', 'f-img2', 'f-img3'][n % 3], name: `기록사진_${n}.jpg`, fileSize: 120_000, mimeType: 'image/jpeg' } })
+    hist.push(l)
   }
   logs['c-history'] = hist
 

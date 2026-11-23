@@ -40,5 +40,10 @@ export function onEvent<E extends IpcEventName>(event: E, cb: (payload: IpcEvent
 }
 
 export function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
+  const raw = e instanceof Error ? e.message : String(e)
+  // 네트워크가 끊겼을 때 Node fetch 가 주는 영어 문구를 그대로 보이지 않게
+  if (/^(.*: )?(fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|network error)/i.test(raw)) {
+    return '두레이에 연결할 수 없습니다. 인터넷 연결을 확인해 주세요.'
+  }
+  return raw
 }

@@ -1218,3 +1218,299 @@ button.danger-btn:disabled {
     animation: none;
   }
 }
+
+/* ---------- 0.1.8: 입력 성능·첨부 트레이·앨범·보내는 중 ---------- */
+
+/* 입력창 높이를 CSS 로 (글자마다 JS 로 재면 대화 목록 전체를 다시 배치한다) */
+.composer-input {
+  field-sizing: content;
+  min-height: 40px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* 위에 이전 메시지를 붙일 때 보던 자리는 앱이 직접 지킨다 (브라우저 자동 고정과 겹치지 않게) */
+.messages {
+  overflow-anchor: none;
+}
+.messages .load-more {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.messages .load-more:hover {
+  color: var(--fg);
+  background: none;
+}
+
+/* 첨부 트레이: 입력창 안 위쪽. 높이 고정 (사진이 늘면 옆으로 스크롤) */
+.tray {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 10px 6px;
+}
+.tray-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 20px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.tray-count {
+  font-weight: 600;
+}
+.tray-head > :nth-child(2) {
+  flex: 1;
+  text-align: right;
+}
+.tray-progress {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tray-bar {
+  display: inline-block;
+  width: 120px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--hover);
+  overflow: hidden;
+}
+.tray-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left;
+  transition: transform 0.25s ease-out;
+}
+.tray-strip {
+  display: flex;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.tray-item {
+  position: relative;
+  flex: none;
+}
+.tray-item.dragging {
+  opacity: 0.4;
+}
+.tray-item.drop-before::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.tray-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel-2);
+  cursor: grab;
+}
+.tray-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tray-name {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 2px;
+  font-size: 9.5px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.tray-item.st-queued .tray-tile,
+.tray-item.st-sending .tray-tile {
+  cursor: default;
+}
+.tray-item.st-queued img {
+  opacity: 0.55;
+}
+.tray-wait,
+.tray-spin,
+.tray-err {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tray-spin::after {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(255, 255, 255, 0.85);
+  border-top-color: var(--accent);
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.28);
+  animation: tray-spin 0.8s linear infinite;
+}
+@keyframes tray-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.tray-item.st-error .tray-tile {
+  border-color: var(--danger);
+  cursor: pointer;
+}
+.tray-err {
+  background: rgba(220, 38, 38, 0.45);
+  color: #fff;
+}
+.tray-item.bad .tray-tile {
+  border-color: var(--danger);
+}
+.tray-bad {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-size: 9.5px;
+  text-align: center;
+  background: var(--danger);
+  color: #fff;
+}
+.tray-x {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--fg);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.tray-item:hover .tray-x,
+.tray-item:focus-within .tray-x {
+  opacity: 1;
+}
+
+/* 사진 앨범 (카톡식 격자). 칸 크기를 장수로 고정해 그림이 늦게 떠도 높이가 바뀌지 않는다 */
+.album {
+  display: grid;
+  gap: 3px;
+  margin-top: 6px;
+  width: min(372px, 100%);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.album.cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+.album.cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.album-tile {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--panel-2);
+  cursor: zoom-in;
+}
+.album-tile.loading {
+  background: linear-gradient(100deg, var(--panel-2) 30%, var(--hover) 50%, var(--panel-2) 70%);
+  background-size: 300% 100%;
+  animation: fa-shimmer 1.3s ease-in-out infinite;
+}
+.album-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: opacity 0.15s;
+}
+.album-tile.loading img {
+  opacity: 0;
+}
+.album-tile:hover img {
+  filter: brightness(0.92);
+}
+.album-tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.album-more {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+}
+.album-err {
+  font-size: 11px;
+  color: var(--muted);
+}
+.album-meta {
+  margin-top: 3px;
+}
+
+/* 보내는 중·보내지 못한 내 메시지 */
+.msg.pending .msg-body {
+  opacity: 0.6;
+}
+.msg.pending.failed .msg-body {
+  opacity: 1;
+}
+.pending-state {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+  margin-top: 2px;
+  min-height: 18px;
+}
+.pending-state .link-like {
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tray-spin::after,
+  .album-tile.loading {
+    animation: none;
+  }
+}
+.tray-head .link-like {
+  font-weight: 400;
+  font-size: 12px;
+}

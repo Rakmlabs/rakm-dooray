@@ -36,6 +36,8 @@ create table if not exists messages(
 );
 create index if not exists idx_messages_order on messages(channel_id, seq, sent_ms);
 create index if not exists idx_messages_sent on messages(sent_ms);
+-- 안 읽음 수(channel_id = ? and sent_ms > ?)를 채널 전체 훑기 없이 (0.1.8)
+create index if not exists idx_messages_ch_sent on messages(channel_id, sent_ms);
 create table if not exists threads(
   thread_channel_id text primary key,
   parent_channel_id text not null,

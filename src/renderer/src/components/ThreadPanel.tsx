@@ -47,7 +47,7 @@ export function ThreadPanel({
   const [createdId, setCreatedId] = useState<string | null>(null)
   useEffect(() => setCreatedId(null), [thread])
   const threadId = thread.threadChannelId || createdId
-  const { messages, loading, error, reload, loadMore, canLoadMore } = useChannelLogs(threadId || null, true, 100)
+  const { messages, loading, error, reload, loadMore, trim, canLoadMore } = useChannelLogs(threadId || null, true, 100)
   useReportSeen(threadId || null, messages, visible)
   const topic = parseTopic(thread.root?.text ?? thread.title ?? '')
   const rich = useRichContentClicks(meId)
@@ -143,6 +143,8 @@ export function ThreadPanel({
           canLoadMore={canLoadMore}
           onLoadMore={loadMore}
           loading={loading}
+          pendingKey={threadId ? `thread:${threadId}` : undefined}
+          onTrim={trim}
         />
       )}
       <Composer
@@ -150,6 +152,7 @@ export function ThreadPanel({
         autoFocusKey={(threadId || `start:${thread.root?.id ?? ''}`) + (thread.startFrom ? ':s' : '')}
         draftKey={threadId ? `thread:${threadId}` : `thread-start:${thread.root?.id ?? ''}`}
         mentionChannelId={thread.parentChannelId}
+        pendingKey={threadId ? `thread:${threadId}` : undefined}
         onSend={async (text) => {
           try {
             if (!threadId && thread.root) {
@@ -166,21 +169,10 @@ export function ThreadPanel({
             await call('messenger:send', threadId!, text)
             await reload()
           } catch (e) {
-            toast(errorText(e))
+            if (!threadId) toast(errorText(e)) // 스레드 안 일반 답글은 목록에서 "보내지 못했습니다" 로 알린다
             throw e
           }
         }}
-        onAttach={
-          threadId
-            ? async () => {
-                try {
-                  if (await call('messenger:uploadFile', threadId)) await reload()
-                } catch (e) {
-                  toast(errorText(e))
-                }
-              }
-            : undefined
-        }
       />
       </FileDropArea>
     </aside>

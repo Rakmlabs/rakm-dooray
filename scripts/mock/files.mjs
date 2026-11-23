@@ -38,6 +38,14 @@ const SAMPLES = [
 files.set('f1', { name: '사업계획서_v3.pdf', mime: 'application/pdf', path: join(FIXTURES, '사업계획서_v3.pdf') })
 for (const [id, name, mime] of SAMPLES) files.set(id, { name, mime: mime ?? 'application/octet-stream', path: join(FIXTURES, name) })
 
+// 카톡처럼 연달아 보낸 사진 묶음 (앨범 표시 확인용): 같은 사진 파일을 다른 id 로 7장
+const ALBUM = ['사무실_화이트보드.jpg', '제품_목업.png', '행사_현수막.jpg', 'screenshot.png', '사무실_화이트보드.jpg', '제품_목업.png', '행사_현수막.jpg']
+ALBUM.forEach((name, i) => files.set(`f-alb${i + 1}`, { name: `워크숍_${i + 1}.${name.split('.').pop()}`, mime: name.endsWith('png') ? 'image/png' : 'image/jpeg', path: join(FIXTURES, name) }))
+
+const UPLOAD_DELAY_MS = Number(process.env.MOCK_UPLOAD_DELAY_MS || 0)
+const UPLOAD_FAIL_EVERY = Number(process.env.MOCK_UPLOAD_FAIL_EVERY || 0)
+let uploadCount = 0
+
 let seeded = false
 function seed(state) {
   if (seeded) return
@@ -50,6 +58,12 @@ function seed(state) {
     const file = { id, name, fileSize: size, ...(mime ? { mimeType: mime } : {}) }
     list.push({ ...state.log('c-general', sender === 'm-me' ? (state.BASE_ME ?? state.ME) : sender, '', ago), type: 'FILE', file })
   }
+  list.push(state.log('c-general', 'm-co', '워크숍 사진 올립니다', 19_000))
+  ALBUM.forEach((_, i) => {
+    const id = `f-alb${i + 1}`
+    const f = files.get(id)
+    list.push({ ...state.log('c-general', 'm-co', '', 18_000 - i * 200), type: 'FILE', file: { id, name: f.name, fileSize: fileBytes(f).length, mimeType: f.mime } })
+  })
 }
 
 function fileBytes(f) {
@@ -79,6 +93,14 @@ export async function handle(ctx) {
   }
   if ((m = p.match(/^\/messenger\/v1\/channels\/([^/]+)\/files$/)) && req.method === 'POST') {
     const channelId = decodeURIComponent(m[1])
+    // 시험용: MOCK_UPLOAD_DELAY_MS 만큼 늦추고, MOCK_UPLOAD_FAIL_EVERY 번째마다 500 으로 실패 (자동 재시도·다시 보내기 확인)
+    uploadCount++
+    if (UPLOAD_DELAY_MS) await new Promise((r) => setTimeout(r, UPLOAD_DELAY_MS))
+    if (UPLOAD_FAIL_EVERY && uploadCount % UPLOAD_FAIL_EVERY === 0) {
+      for await (const _ of req) void _
+      send(500, { header: { isSuccessful: false, resultCode: -1, resultMessage: encodeURIComponent('모의 업로드 실패') } })
+      return true
+    }
     const form = await new Request('http://mock/upload', {
       method: 'POST',
       headers: { 'content-type': req.headers['content-type'] ?? '' },

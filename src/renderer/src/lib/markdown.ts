@@ -122,9 +122,25 @@ export function mentionMarkup(name: string, memberId: string, organizationId: st
   return organizationId ? `[@${safe}](dooray://${organizationId}/members/${memberId} "member")` : `@${safe}`
 }
 
+// 같은 본문을 다시 그릴 때(목록을 다시 펼치거나 스크롤로 다시 그릴 때) 파싱·정리를 반복하지 않게 최근 결과를 둔다
+const MD_CACHE_MAX = 3000
+const mdCache = new Map<string, string>()
+
 export function renderMarkdown(src: string, opts: { breaks?: boolean } = {}): string {
-  const html = md.parse(replaceMentions(src), { async: false, breaks: opts.breaks ?? true }) as string
-  return DOMPurify.sanitize(html, { FORBID_TAGS: ['style', 'iframe', 'form', 'input'], FORBID_ATTR: ['style'] })
+  const breaks = opts.breaks ?? true
+  const key = (breaks ? '1' : '0') + src
+  const hit = mdCache.get(key)
+  if (hit !== undefined) {
+    // 최근에 쓴 것을 뒤로 (오래 안 쓴 것부터 버린다)
+    mdCache.delete(key)
+    mdCache.set(key, hit)
+    return hit
+  }
+  const html = md.parse(replaceMentions(src), { async: false, breaks }) as string
+  const out = DOMPurify.sanitize(html, { FORBID_TAGS: ['style', 'iframe', 'form', 'input'], FORBID_ATTR: ['style'] })
+  mdCache.set(key, out)
+  if (mdCache.size > MD_CACHE_MAX) mdCache.delete(mdCache.keys().next().value as string)
+  return out
 }
 
 // ---------- 링크 ----------

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Member } from '@shared/types'
 import { call } from '../api'
 import { useMemberNames } from '../state'
@@ -11,6 +11,9 @@ import { useOrganizationId, useProfile } from './chat/chatStore'
 import { activeMention, applyFormat, applyMentions, autoCloseFence, closeOpenFence, indentCode, insideCodeFence, type Edit, type FormatKind } from './chat/composerText'
 import { renderMarkdown } from '../lib/markdown'
 import { EDIT_LAST_EVENT, type EditLastDetail } from './MessageList'
+import { sendOptimistic } from './chat/pendingStore'
+import { AttachTray } from './files/AttachTray'
+import { useUploadQueue } from './files/uploadQueue'
 
 interface Props {
   placeholder: string
@@ -26,6 +29,9 @@ interface Props {
   draftKey?: string
   /** 멘션 후보를 가져올 대화방 (없으면 channelId). 스레드는 원래 대화방을 넣는다 */
   mentionChannelId?: string
+  /** 있으면 낙관적 전송: Enter 를 누르면 입력창을 바로 비우고, 목록(같은 키의 MessageList)에 "보내는 중" 으로 먼저 그린다.
+   *  답장·스레드 시작처럼 배너가 떠 있을 때는 예전처럼 끝날 때까지 기다린다. */
+  pendingKey?: string
 }
 
 // ---------- 임시 저장 (localStorage) ----------
@@ -58,10 +64,12 @@ function saveDraft(key: string, d: Draft): void {
   }
 }
 
-// 기본은 끔 (0.1.6 까지는 켬이 기본이라 키를 바꿨다)
-/** 입력창 최대 높이. 넘치면 안에서 스크롤 */
+/** 입력창 최대 높이. 넘치면 안에서 스크롤 (chat.css 의 .composer-input max-height 와 같게) */
 const MAX_INPUT_PX = 240
+/** CSS 로 내용 높이에 맞춘다 (Chromium 123+). 그러면 글자마다 높이를 재지 않는다 = 대화 목록을 다시 배치하지 않는다 */
+const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports?.('field-sizing', 'content')
 
+// 기본은 끔 (0.1.6 까지는 켬이 기본이라 키를 바꿨다)
 const PREVIEW_KEY = 'rakm.chat.codePreview.v2'
 function loadPreviewPref(): boolean {
   try {
@@ -106,7 +114,9 @@ export function formatShortcut(e: { metaKey: boolean; ctrlKey: boolean; shiftKey
 }
 
 /** Enter 전송, Shift+Enter 줄바꿈 (코드 블록 안에서는 Enter 도 줄바꿈, ⌘/Ctrl+Enter 는 항상 전송). 한글 조합 중 Enter 는 무시한다. */
-export function Composer({
+export const Composer = memo(ComposerImpl)
+
+function ComposerImpl({
   placeholder,
   onSend,
   onAttach,
@@ -116,7 +126,8 @@ export function Composer({
   autoFocusKey,
   channelId,
   draftKey,
-  mentionChannelId
+  mentionChannelId,
+  pendingKey
 }: Props) {
   const key = draftKey ?? channelId ?? placeholder
   const [state, setState] = useState<{ key: string } & Draft>(() => ({ key, ...loadDraft(key) }))
@@ -144,13 +155,19 @@ export function Composer({
     ref.current?.focus()
   }, [autoFocusKey])
 
+  // field-sizing 을 못 쓰는 환경에서만: 줄 수가 바뀔 때만 잰다
+  const lineCount = useMemo(() => (FIELD_SIZING ? 0 : text.split('\n').length + Math.floor(text.length / 80)), [text])
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || FIELD_SIZING) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(MAX_INPUT_PX, el.scrollHeight)}px`
     el.style.overflowY = el.scrollHeight > MAX_INPUT_PX ? 'auto' : 'hidden'
-  }, [text])
+  }, [lineCount])
+
+  const uploads = useUploadQueue()
+  const fileInput = useRef<HTMLInputElement>(null)
+  const hasFiles = !!uploads && uploads.readyCount > 0
 
   // 임시 저장 (조금 모아서)
   useEffect(() => {
@@ -256,13 +273,28 @@ export function Composer({
 
   async function submit() {
     const t = text.trim()
-    if (!t || sending) return
+    if (sending) return
+    if (!t) {
+      if (hasFiles) uploads!.sendAll()
+      return
+    }
+    const out = applyMentions(closeOpenFence(t), state.mentions, organizationId)
+    if (pendingKey && !banner) {
+      // 낙관적 전송: 바로 비우고 목록에 "보내는 중" 으로. 글이 먼저, 첨부는 그 다음에 (순서를 지키려고 글이 들어간 뒤 올린다)
+      setState({ key, text: '', mentions: {} })
+      saveDraft(key, { text: '', mentions: {} })
+      const files = hasFiles
+      void sendOptimistic(pendingKey, out, onSend).then(() => files && uploads?.sendAll())
+      ref.current?.focus()
+      return
+    }
     setSending(true)
     try {
       // 실제로 남아 있는 @이름 만 멘션으로 바꾼다
-      await onSend(applyMentions(closeOpenFence(t), state.mentions, organizationId))
+      await onSend(out)
       setState({ key, text: '', mentions: {} })
       saveDraft(key, { text: '', mentions: {} })
+      if (hasFiles) uploads!.sendAll()
     } catch {
       // 실패하면 입력한 글을 남겨 둔다 (오류 표시는 onSend 쪽에서)
     } finally {
@@ -273,7 +305,9 @@ export function Composer({
 
   const syncCaret = () => setCaret(ref.current?.selectionStart ?? 0)
   const inFence = insideCodeFence(text, caret)
-  const showPreview = previewOn && /```|`[^`\n]+`/.test(text)
+  // 미리보기는 입력보다 늦게 따라와도 된다 (글자를 칠 때마다 마크다운을 다시 그리지 않게)
+  const previewText = useDeferredValue(previewOn ? text : '')
+  const showPreview = previewOn && /```|`[^`\n]+`/.test(previewText)
 
   return (
     <div className="composer" ref={rootRef}>
@@ -319,9 +353,10 @@ export function Composer({
         />
       )}
       {showPreview && (
-        <div className="composer-preview md" aria-label="보낼 메시지 미리보기" dangerouslySetInnerHTML={{ __html: renderMarkdown(closeOpenFence(text)) }} />
+        <div className="composer-preview md" aria-label="보낼 메시지 미리보기" dangerouslySetInnerHTML={{ __html: renderMarkdown(closeOpenFence(previewText)) }} />
       )}
       <div className={`composer-box ${disabled ? 'disabled' : ''}`}>
+        {uploads && <AttachTray q={uploads} />}
         <textarea
           ref={ref}
           rows={1}
@@ -405,12 +440,31 @@ export function Composer({
           }}
         />
         <div className="composer-bar" role="toolbar" aria-label="입력 도구">
-          {onAttach && (
-            <button className="icon-btn tip" data-tip="파일 첨부 (끌어 놓기·붙여넣기도 됩니다)" aria-label="파일 첨부" onClick={() => void onAttach()} disabled={disabled}>
+          {(onAttach || uploads) && (
+            <button
+              className="icon-btn tip"
+              data-tip="사진·파일 첨부 — 한 번에 30개까지 (끌어 놓기·붙여넣기도 됩니다)"
+              aria-label="파일 첨부"
+              onClick={() => (uploads && !uploads.disabled ? fileInput.current?.click() : void onAttach?.())}
+              disabled={disabled || (!!uploads && uploads.disabled && !onAttach)}
+            >
               <Icon name="clip" size={16} />
             </button>
           )}
-          {onAttach && <span className="composer-tools-sep" aria-hidden />}
+          {uploads && (
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                uploads.add(Array.from(e.target.files ?? []))
+                e.target.value = ''
+                ref.current?.focus()
+              }}
+            />
+          )}
+          {(onAttach || uploads) && <span className="composer-tools-sep" aria-hidden />}
           <button className="icon-btn tip" data-tip="인라인 코드 ⌘⇧C" aria-label="인라인 코드" disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => format('inline')}>
             <ChatIcon name="code" size={16} />
           </button>
@@ -466,7 +520,7 @@ export function Composer({
           >
             <ChatIcon name="eye" size={16} />
           </button>
-          <button className="send-btn tip tip-right" data-tip="보내기 Enter · 줄바꿈 Shift+Enter" onClick={() => void submit()} disabled={disabled || sending || !text.trim()} aria-label="보내기">
+          <button className="send-btn tip tip-right" data-tip="보내기 Enter · 줄바꿈 Shift+Enter" onClick={() => void submit()} disabled={disabled || sending || (!text.trim() && !hasFiles)} aria-label="보내기">
             <Icon name="send" size={15} />
           </button>
         </div>

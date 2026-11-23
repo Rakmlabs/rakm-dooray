@@ -1,5 +1,5 @@
 import { parseSystem, systemText } from '@shared/system-message'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import type { Message } from '@shared/types'
 import type { ReplyRef } from '@shared/types-chat'
 import { call, errorText } from '../api'
@@ -10,6 +10,8 @@ import { navigate } from '../lib/nav'
 import { parseTopic } from '../lib/projects'
 import { Icon } from './Icon'
 import { FileAttachment } from './files/FileAttachment'
+import { ALBUM_GAP_MS, PhotoAlbum, isAlbumPhoto } from './files/PhotoAlbum'
+import { removePending, usePending, type PendingSend } from './chat/pendingStore'
 import { Avatar } from './people/Avatar'
 import { useProfileCard } from './people/ProfileCard'
 import { ChatIcon } from './chat/ChatIcon'
@@ -42,6 +44,10 @@ interface Props {
   showBookmarksEntry?: boolean
   /** 처음 불러오는 중이면 메시지 자리 표시(스켈레톤) */
   loading?: boolean
+  /** 같은 키로 Composer 가 넣은 "보내는 중" 메시지를 맨 아래에 그린다 */
+  pendingKey?: string
+  /** 맨 아래로 돌아왔을 때: 불러온 범위를 처음 크기로 줄여도 된다 */
+  onTrim?: () => void
 }
 
 const NO_IDS: string[] = []
@@ -92,6 +98,82 @@ export function useRichContentClicks(meId: string | null) {
   return { onClick, onKeyDown, open: card.open, node: card.node }
 }
 
+/** 처음·맨 아래에서 그리는 줄 수. 위로 올리면 STEP 씩 늘린다 (수천 개를 한꺼번에 DOM 에 두지 않는다) */
+const WINDOW_ROWS = 120
+const WINDOW_STEP = 120
+/** 그린 범위의 위쪽 끝에서 이만큼 안이면 보관함·서버에서 더 불러온다 */
+const PREFETCH_ROWS = 80
+/** 한 번에 DOM 에 두는 최대 줄 수. 위로 많이 올라가면 아래쪽(지나온 것)을 떼어 낸다 */
+const MAX_RENDER_ROWS = 360
+/** 앨범 하나에 묶는 최대 장수 (한 번에 보낼 수 있는 수와 같게) */
+const MAX_ALBUM = 30
+
+export type Row =
+  | { kind: 'msg'; key: string; m: Message; day: string | null; marker: boolean; grouped: boolean; system: boolean }
+  | { kind: 'album'; key: string; ms: Message[]; day: string | null; marker: boolean; grouped: boolean }
+
+const isSystem = (m: Message) => (!!m.senderType && m.senderType !== 'member' && m.senderType !== 'app') || !!parseSystem(m)
+
+/** 메시지 → 그릴 줄 (날짜 구분선·읽음 표시·같은 사람 묶기·사진 앨범). 메시지가 바뀔 때만 다시 만든다 */
+export function buildRows(messages: Message[], markerId: string | null): Row[] {
+  const rows: Row[] = []
+  let lastDay = ''
+  let lastSender: string | null = null
+  let lastTime = 0
+  let lastHadThread = false
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
+    const day = m.sentAt ? formatDay(m.sentAt) : ''
+    const showDay = !!day && day !== lastDay
+    const marker = m.id === markerId
+    const t = m.sentAt ? Date.parse(m.sentAt) : 0
+    const system = isSystem(m)
+    const grouped =
+      !showDay && !marker && !system && !lastHadThread && lastSender === m.senderId && t - lastTime < GROUP_GAP_MS && t >= lastTime && m.type !== 'REPLY'
+    lastDay = day || lastDay
+    // 사진 앨범: 같은 사람이 짧은 간격으로 이어 보낸 사진 2장 이상
+    if (!system && isAlbumPhoto(m)) {
+      let j = i + 1
+      let prevT = t
+      while (j < messages.length) {
+        const n = messages[j]
+        const nt = n.sentAt ? Date.parse(n.sentAt) : 0
+        if (j - i >= MAX_ALBUM || !isAlbumPhoto(n) || n.senderId !== m.senderId || n.id === markerId || nt - prevT > ALBUM_GAP_MS || nt < prevT) break
+        if ((n.sentAt ? formatDay(n.sentAt) : '') !== (day || lastDay)) break
+        prevT = nt
+        j++
+      }
+      if (j - i >= 2) {
+        const ms = messages.slice(i, j)
+        rows.push({ kind: 'album', key: `a:${m.id}`, ms, day: showDay ? day : null, marker, grouped })
+        lastSender = m.senderId
+        lastTime = prevT
+        lastHadThread = false
+        i = j - 1
+        continue
+      }
+    }
+    rows.push({ kind: 'msg', key: m.id, m, day: showDay ? day : null, marker, grouped, system })
+    lastSender = system ? null : m.senderId
+    lastTime = t
+    lastHadThread = !!m.thread
+  }
+  return rows
+}
+
+/** 목록 항목이 부르는 동작. 참조가 바뀌지 않아 항목(React.memo)을 다시 그리지 않는다 */
+interface Actions {
+  reply: (m: Message) => void
+  openThread: (m: Message) => void
+  startThread: (m: Message) => void
+  changed: () => void
+  jump: (id: string) => void
+  openProfile: (memberId: string, el: Element) => void
+  toggleBookmark: (m: Message) => void
+  sendToWiki: (m: Message) => void
+  setEditing: (id: string | null) => void
+}
+
 export function MessageList(props: Props) {
   const { messages, meId, inThread, readMarkerAt } = props
   // 읽음 확인: 내 메시지를 아직 이 앱에서 읽지 않은 사람 (기록이 있는 사람만 센다)
@@ -111,13 +193,96 @@ export function MessageList(props: Props) {
   const replyRefs = useReplyRefs(channelId, messages, meId)
   const bookmarks = useBookmarks()
   const bookmarked = useMemo(() => new Set(bookmarks.list.map((b) => b.key)), [bookmarks.list])
+  const pending = usePending(props.pendingKey)
 
   const inner = useRef<HTMLDivElement>(null)
   const lastId = useRef<string | null>(null)
+  const lastPending = useRef(0)
   /** 위로 올려 보는 동안 아래에 새로 온 남의 메시지 수 */
   const [unseen, setUnseen] = useState(0)
   /** 맨 아래에서 꽤 떨어져 있음 → "최근 메시지로" 버튼 */
   const [farFromBottom, setFarFromBottom] = useState(false)
+
+  // "여기까지 읽음": 표시 시각 이후 처음 온 남의 메시지 앞
+  const markerId = useMemo(() => {
+    if (!readMarkerAt) return null
+    const at = Date.parse(readMarkerAt)
+    if (Number.isNaN(at)) return null
+    const first = messages.find((m) => m.sentAt && Date.parse(m.sentAt) > at && m.senderId !== meId)
+    return first?.id ?? null
+  }, [messages, readMarkerAt, meId])
+
+  const rows = useMemo(() => buildRows(messages, markerId), [messages, markerId])
+
+  // ---------- 그릴 범위 (아래에서부터 windowRows 줄) ----------
+  const [windowRows, setWindowRows] = useState(WINDOW_ROWS)
+  /** 아래쪽에서 떼어 낸 줄 수 (많이 올라가 있을 때만). 0 이면 맨 아래까지 그린다 */
+  const [hiddenBelow, setHiddenBelow] = useState(0)
+  const viewKey = props.pendingKey ?? channelId
+  useEffect(() => {
+    setWindowRows(WINDOW_ROWS)
+    setHiddenBelow(0)
+  }, [viewKey])
+  const start = Math.max(0, rows.length - windowRows)
+  // 어떤 순서로 상태가 바뀌어도 최소 WINDOW_STEP 줄은 그린다
+  const below = Math.min(hiddenBelow, Math.max(0, rows.length - start - WINDOW_STEP))
+  const end = rows.length - below
+  const visible = start > 0 || end < rows.length ? rows.slice(start, end) : rows
+  const backToLatest = () => {
+    setHiddenBelow(0)
+    setWindowRows(WINDOW_ROWS)
+  }
+
+  /** 위에 줄이 붙어도 보던 자리를 지키려고, 바꾸기 전 화면 맨 위 줄과 그 위치를 적어 둔다 */
+  const anchor = useRef<{ key: string; top: number; firstKey: string | undefined; at: number } | null>(null)
+  const captureAnchor = () => {
+    const el = scroller.current
+    if (!el) return
+    const top = el.getBoundingClientRect().top
+    for (const row of el.querySelectorAll<HTMLElement>('[data-row-key]')) {
+      const r = row.getBoundingClientRect()
+      if (r.bottom > top) {
+        anchor.current = { key: row.dataset.rowKey!, top: r.top, firstKey: visible[0]?.key, at: Date.now() }
+        return
+      }
+    }
+  }
+  useLayoutEffect(() => {
+    const a = anchor.current
+    const el = scroller.current
+    if (!a || !el) return
+    if (visible[0]?.key === a.firstKey) {
+      if (Date.now() - a.at > 10_000) anchor.current = null // 불러오기가 끝났는데 더 없음
+      return
+    }
+    const row = el.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(a.key)}"]`)
+    if (row) el.scrollTop += row.getBoundingClientRect().top - a.top
+    anchor.current = null
+  }, [visible])
+
+  const loadingOlder = useRef(false)
+  useEffect(() => {
+    loadingOlder.current = false
+  }, [messages.length])
+
+  /** 위쪽 끝 근처: 그린 범위를 넓히고, 불러온 것의 끝이 가까우면 더 불러온다 */
+  const growUp = () => {
+    if (anchor.current) return
+    const canGrow = start > 0
+    const nearLoadedTop = start - WINDOW_STEP < PREFETCH_ROWS
+    const willLoad = nearLoadedTop && props.canLoadMore && !!props.onLoadMore && !loadingOlder.current
+    if (!canGrow && !willLoad) return
+    captureAnchor()
+    const nextWindow = Math.min(windowRows + WINDOW_STEP, Math.max(rows.length, windowRows) + WINDOW_STEP)
+    setWindowRows(nextWindow)
+    // 그리는 줄이 너무 많아지면 아래(지나온 것)를 떼어 낸다. 위쪽 내용은 그대로라 보던 자리는 움직이지 않는다
+    const rendered = Math.min(rows.length, nextWindow) - below
+    if (rendered > MAX_RENDER_ROWS) setHiddenBelow(below + rendered - MAX_RENDER_ROWS)
+    if (willLoad) {
+      loadingOlder.current = true
+      props.onLoadMore!()
+    }
+  }
 
   // 새 메시지가 오면, 사용자가 맨 아래를 보고 있을 때만 따라 내려간다. 내가 보낸 것이면 항상 내려간다 (슬랙과 같음)
   useLayoutEffect(() => {
@@ -125,8 +290,13 @@ export function MessageList(props: Props) {
     if (!el) return
     const last = messages[messages.length - 1]
     const appended = !!last && last.id !== lastId.current && lastCount.current > 0
-    const mineNew = appended && !!meId && last.senderId === meId
-    if (stickToBottom.current || lastCount.current === 0 || mineNew) {
+    const mineNew = (appended && !!meId && last.senderId === meId) || pending.length > lastPending.current
+    if (mineNew && below > 0) {
+      // 위에서 보다가 내가 보냈으면 맨 아래로 (떼어 낸 아래쪽을 다시 그리면 ResizeObserver 가 바닥에 붙인다)
+      stickToBottom.current = true
+      backToLatest()
+    }
+    if ((stickToBottom.current && below === 0) || lastCount.current === 0 || mineNew) {
       el.scrollTop = el.scrollHeight
       stickToBottom.current = true
       setUnseen(0)
@@ -137,7 +307,8 @@ export function MessageList(props: Props) {
     }
     lastCount.current = messages.length
     lastId.current = last?.id ?? null
-  }, [messages, meId])
+    lastPending.current = pending.length
+  }, [messages, meId, pending.length])
 
   // 입력창이 자라거나 이미지·미리보기 카드가 늦게 그려져 높이가 바뀌어도, 맨 아래를 보고 있었다면 맨 아래에 붙어 있게
   useEffect(() => {
@@ -152,14 +323,23 @@ export function MessageList(props: Props) {
     return () => ro.disconnect()
   }, [])
 
+  const onTrim = props.onTrim
   const onScroll = () => {
     const el = scroller.current
     if (!el) return
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight
-    stickToBottom.current = gap < 80
-    if (stickToBottom.current && unseen) setUnseen(0)
+    // 아래쪽을 떼어 낸 동안은 진짜 맨 아래가 아니다: 가까이 오면 다시 붙인다
+    if (below > 0 && gap < 600) setHiddenBelow((h) => Math.max(0, h - WINDOW_STEP))
+    stickToBottom.current = gap < 80 && below === 0
+    if (stickToBottom.current) {
+      if (unseen) setUnseen(0)
+      // 맨 아래로 돌아오면 그린 범위·불러온 범위를 처음 크기로 줄인다 (DOM·메모리·폴링 크기를 작게)
+      if (windowRows > WINDOW_ROWS * 2) setWindowRows(WINDOW_ROWS)
+      if (messages.length > WINDOW_ROWS * 3) onTrim?.()
+    }
     const far = gap > 600
     if (far !== farFromBottom) setFarFromBottom(far)
+    if (el.scrollTop < 600) growUp()
   }
 
   const toBottom = () => {
@@ -167,7 +347,11 @@ export function MessageList(props: Props) {
     if (!el) return
     stickToBottom.current = true
     setUnseen(0)
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    if (below > 0 || windowRows > WINDOW_ROWS * 2) {
+      // 멀리 있으면 애니메이션 없이 바로 (중간 수천 줄을 훑으며 그리지 않게)
+      backToLatest()
+      el.scrollTop = el.scrollHeight
+    } else el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }
 
   // 빈 입력창에서 ↑ → 내 마지막 메시지 수정
@@ -186,38 +370,89 @@ export function MessageList(props: Props) {
     return () => window.removeEventListener(EDIT_LAST_EVENT, h)
   }, [messages, meId])
 
+  /** 이 메시지가 들어 있는 줄이 그린 범위 밖이면 범위를 넓힌다. 이미 그려져 있으면 true */
+  const reveal = useCallback(
+    (id: string): boolean => {
+      const idx = rows.findIndex((r) => (r.kind === 'msg' ? r.m.id === id : r.ms.some((x) => x.id === id)))
+      if (idx < 0) return false
+      if (idx >= start && idx < end) return true
+      // 그 줄 앞뒤로 그린다
+      const from = Math.max(0, idx - 40)
+      setWindowRows(rows.length - from)
+      setHiddenBelow(Math.max(0, rows.length - (from + MAX_RENDER_ROWS)))
+      return false
+    },
+    [rows, start, end]
+  )
+
+  const [jumpWant, setJumpWant] = useState<string | null>(null)
   const jumpTo = useCallback(
     (id: string) => {
-      const el = scroller.current?.querySelector(`[data-msg-id="${CSS.escape(id)}"]`)
-      if (!el) {
+      if (!rows.some((r) => (r.kind === 'msg' ? r.m.id === id : r.ms.some((x) => x.id === id)))) {
         toast('원 메시지가 지금 불러온 범위에 없습니다. 위로 올려 이전 메시지를 더 불러오세요.', 'info')
         return
       }
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      setFlashId(id)
-      window.setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 1800)
+      reveal(id)
+      setJumpWant(id)
     },
-    [toast]
+    [toast, rows, reveal]
+  )
+  useEffect(() => {
+    if (!jumpWant) return
+    const el = scroller.current?.querySelector(`[data-msg-id="${CSS.escape(jumpWant)}"]`)
+    if (!el) return
+    stickToBottom.current = false
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlashId(jumpWant)
+    setJumpWant(null)
+    const id = jumpWant
+    window.setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 1800)
+  }, [jumpWant, visible])
+
+  // 검색·알림에서 온 메시지: 그린 범위 밖이면 넓힌다 (그려지면 항목이 스스로 가운데로 온다)
+  useEffect(() => {
+    if (props.highlightId) {
+      if (reveal(props.highlightId)) stickToBottom.current = false
+    }
+  }, [props.highlightId, reveal])
+
+  // 항목에 넘기는 동작은 한 번만 만든다 (최신 props 는 ref 로 읽는다)
+  const latest = useRef({ props, toast, bookmarks, rich, jumpTo })
+  latest.current = { props, toast, bookmarks, rich, jumpTo }
+  const act = useMemo<Actions>(
+    () => ({
+      reply: (m) => {
+        notePendingReply(m)
+        latest.current.props.onReply?.(m)
+      },
+      openThread: (m) => latest.current.props.onOpenThread?.(m),
+      startThread: (m) => latest.current.props.onStartThread?.(m),
+      changed: () => latest.current.props.onChanged(),
+      jump: (id) => latest.current.jumpTo(id),
+      openProfile: (id, el) => latest.current.rich.open(id, el),
+      toggleBookmark: async (m) => {
+        const { props: p, toast: t, bookmarks: b } = latest.current
+        try {
+          const on = await b.toggle(m, p.inThread ? (p.parentChannelId ?? null) : null)
+          t(on ? '북마크에 넣었습니다.' : '북마크에서 뺐습니다.', 'info')
+        } catch (e) {
+          t(errorText(e))
+        }
+      },
+      sendToWiki: (m) => setWikiSend(m),
+      setEditing: (id) => setEditingId(id)
+    }),
+    []
   )
 
-  // "여기까지 읽음": 표시 시각 이후 처음 온 남의 메시지 앞
-  const markerId = useMemo(() => {
-    if (!readMarkerAt) return null
-    const at = Date.parse(readMarkerAt)
-    if (Number.isNaN(at)) return null
-    const first = messages.find((m) => m.sentAt && Date.parse(m.sentAt) > at && m.senderId !== meId)
-    return first?.id ?? null
-  }, [messages, readMarkerAt, meId])
-
   const showEntry = props.showBookmarksEntry ?? !inThread
-
-  let lastDay = ''
-  let lastSender: string | null = null
-  let lastTime = 0
-  let lastHadThread = false
+  const canReply = !!props.onReply
+  const canStartThread = !inThread && !!props.onStartThread
+  const lastRow = rows[rows.length - 1]
+  const pendingGrouped = !!lastRow && lastRow.kind === 'msg' && !lastRow.system && !!meId && lastRow.m.senderId === meId
 
   return (
-    <div className="messages" ref={scroller} onScroll={onScroll} onClick={rich.onClick} onKeyDown={rich.onKeyDown}>
+    <div className="messages" ref={scroller} onScroll={onScroll} onClick={rich.onClick} onKeyDown={rich.onKeyDown} data-total={messages.length}>
       {showEntry && (
         <div className="msgs-tools">
           <button className="msgs-tool-btn" onClick={() => setBookmarksOpen(true)} title="북마크한 메시지 보기">
@@ -227,12 +462,13 @@ export function MessageList(props: Props) {
         </div>
       )}
       <div className="msgs-inner" ref={inner}>
-      {props.canLoadMore && (
-        <button className="load-more" onClick={props.onLoadMore}>
-          이전 메시지 더 보기
+      {(start > 0 || props.canLoadMore) && (
+        <button className="load-more" onClick={growUp}>
+          {loadingOlder.current ? '이전 메시지 불러오는 중…' : '위로 올리면 이전 메시지를 더 불러옵니다'}
         </button>
       )}
       {messages.length === 0 &&
+        pending.length === 0 &&
         (props.loading ? (
           <div className="msg-skeletons" aria-label="메시지를 불러오는 중" aria-busy="true">
             {[72, 46, 88, 58, 66].map((w, i) => (
@@ -251,62 +487,48 @@ export function MessageList(props: Props) {
             <span>{inThread ? '아래 입력창에 첫 답글을 남겨 보세요.' : '첫 메시지를 보내 대화를 시작해 보세요.'}</span>
           </div>
         ))}
-      {!props.canLoadMore && messages.length > 0 && messages.length >= 1000 && (
+      {!props.canLoadMore && start === 0 && messages.length > 0 && messages.length >= 1000 && (
         <div className="muted center small">이 컴퓨터에 받아 둔 기록은 여기까지입니다.</div>
       )}
-      {messages.map((m) => {
-        const day = m.sentAt ? formatDay(m.sentAt) : ''
-        const showDay = !!day && day !== lastDay
-        const showMarker = m.id === markerId
-        const t = m.sentAt ? Date.parse(m.sentAt) : 0
-        const system = (!!m.senderType && m.senderType !== 'member' && m.senderType !== 'app') || !!parseSystem(m)
-        const grouped =
-          !showDay && !showMarker && !system && !lastHadThread && lastSender === m.senderId && t - lastTime < GROUP_GAP_MS && t >= lastTime && m.type !== 'REPLY'
-        lastDay = day || lastDay
-        lastSender = system ? null : m.senderId
-        lastTime = t
-        lastHadThread = !!m.thread
-        return (
-          <div key={m.id}>
-            {showDay && (
-              <div className="day-sep">
-                <span>{day}</span>
-              </div>
-            )}
-            {showMarker && (
-              <div className="read-marker" role="separator" aria-label="여기까지 읽음">
-                <span>여기까지 읽음</span>
-              </div>
-            )}
+      {visible.map((r) => (
+        <div key={r.key} data-row-key={r.key}>
+          {r.day && (
+            <div className="day-sep">
+              <span>{r.day}</span>
+            </div>
+          )}
+          {r.marker && (
+            <div className="read-marker" role="separator" aria-label="여기까지 읽음">
+              <span>여기까지 읽음</span>
+            </div>
+          )}
+          {r.kind === 'album' ? (
+            <AlbumItem ms={r.ms} mine={!!meId && r.ms[0].senderId === meId} grouped={r.grouped} canReply={canReply} act={act} />
+          ) : (
             <MessageItem
-              {...props}
-              m={m}
-              mine={!!meId && m.senderId === meId}
-              unreadIds={receipts.enabled && meId && m.senderId === meId ? unreadBy(m, receiptMembers, receipts, laterBy) : NO_IDS}
-              grouped={grouped}
-              system={system}
-              editing={editingId === m.id}
-              setEditing={(v) => setEditingId(v ? m.id : null)}
-              flash={flashId === m.id}
-              replyRef={m.type === 'REPLY' ? (replyRefs.get(m.id) ?? null) : null}
-              onJump={jumpTo}
-              onOpenProfile={rich.open}
-              isBookmarked={bookmarked.has(bookmarkKey(m))}
-              onToggleBookmark={async () => {
-                try {
-                  const on = await bookmarks.toggle(m, inThread ? (props.parentChannelId ?? null) : null)
-                  toast(on ? '북마크에 넣었습니다.' : '북마크에서 뺐습니다.', 'info')
-                } catch (e) {
-                  toast(errorText(e))
-                }
-              }}
-              onSendToWiki={() => setWikiSend(m)}
+              m={r.m}
+              mine={!!meId && r.m.senderId === meId}
+              unreadKey={receipts.enabled && meId && r.m.senderId === meId ? unreadBy(r.m, receiptMembers, receipts, laterBy).join(',') : ''}
+              grouped={r.grouped}
+              system={r.system}
+              inThread={!!inThread}
+              canReply={canReply}
+              canStartThread={canStartThread}
+              editing={editingId === r.m.id}
+              flash={flashId === r.m.id}
+              highlighted={props.highlightId === r.m.id}
+              replyRef={r.m.type === 'REPLY' ? (replyRefs.get(r.m.id) ?? null) : null}
+              isBookmarked={bookmarked.has(bookmarkKey(r.m))}
+              act={act}
             />
-          </div>
-        )
-      })}
+          )}
+        </div>
+      ))}
+      {pending.map((p, i) => (
+        <PendingItem key={`p${p.id}`} p={p} meId={meId} grouped={i > 0 || pendingGrouped} />
+      ))}
       </div>
-      {(unseen > 0 || farFromBottom) && (
+      {(unseen > 0 || farFromBottom || below > 0) && (
         <div className="jump-latest-wrap">
           <button className={`jump-latest ${unseen > 0 ? 'has-new' : ''}`} onClick={toBottom}>
             {unseen > 0 ? `새 메시지 ${unseen > 99 ? '99+' : unseen}개` : '최근 메시지로'}
@@ -335,22 +557,122 @@ function DrawerEsc({ onClose }: { onClose: () => void }) {
   return null
 }
 
-interface ItemProps extends Props {
+/** 보내는 중·보내지 못한 내 메시지 (낙관적 전송). 서버에 들어가 목록을 다시 받으면 사라지고 진짜 메시지로 바뀐다 */
+function PendingItem({ p, meId, grouped }: { p: PendingSend; meId: string | null; grouped: boolean }) {
+  const nameOf = useMemberNames()
+  const html = useMemo(() => renderMarkdown(p.text), [p.text])
+  const failed = p.status === 'failed'
+  return (
+    <div className={`msg mine pending ${grouped ? 'grouped' : ''} ${failed ? 'failed' : ''}`} aria-busy={!failed}>
+      <div className="msg-gutter">{!grouped && <Avatar memberId={meId} size={36} />}</div>
+      <div className="msg-main">
+        {!grouped && (
+          <div className="msg-head">
+            <span className="msg-sender">{(meId && nameOf(meId)) || '나'}</span>
+          </div>
+        )}
+        <div className="msg-body md" dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="pending-state" role="status">
+          {failed ? (
+            <>
+              <span className="err">보내지 못했습니다{p.error ? ` — ${p.error}` : ''}</span>
+              <button className="link-like" onClick={() => void p.retry()}>
+                다시 보내기
+              </button>
+              <button className="link-like muted" onClick={() => removePending(p.id)}>
+                지우기
+              </button>
+            </>
+          ) : (
+            <span className="muted">보내는 중…</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** 사진 앨범 한 줄 (같은 사람이 이어 보낸 사진 여러 장). 답장은 첫 사진에, 삭제는 묶음 전체 */
+const AlbumItem = memo(function AlbumItem({ ms, mine, grouped, canReply, act }: { ms: Message[]; mine: boolean; grouped: boolean; canReply: boolean; act: Actions }) {
+  const nameOf = useMemberNames()
+  const { toast } = useApp()
+  const first = ms[0]
+  const sender = nameOf(first.senderId) ?? '…'
+  const profileBtn = (el: Element) => first.senderId && act.openProfile(first.senderId, el)
+
+  async function removeAll() {
+    if (!window.confirm(`사진 ${ms.length}장을 모두 삭제할까요? 되돌릴 수 없습니다.`)) return
+    let failed = 0
+    let reason = ''
+    for (const m of ms) {
+      try {
+        await call('messenger:delete', m.channelId, m.id)
+      } catch (e) {
+        failed++
+        reason ||= errorText(e)
+      }
+    }
+    if (failed) toast(`${failed}장은 지우지 못했습니다 — ${deleteReasonHint(reason)}`)
+    act.changed()
+  }
+
+  return (
+    <div className={`msg album-row ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''}`} data-msg-id={first.id}>
+      <div className="msg-gutter">
+        {grouped ? (
+          <span className="msg-hover-time" title={formatTime(first.sentAt)}>
+            {clockOf(first.sentAt)}
+          </span>
+        ) : (
+          <button className="avatar-btn" onClick={(e) => profileBtn(e.currentTarget)} aria-label={`${sender} 프로필`} disabled={!first.senderId}>
+            <Avatar memberId={first.senderId} size={36} />
+          </button>
+        )}
+      </div>
+      <div className="msg-main">
+        {!grouped && (
+          <div className="msg-head">
+            <button className="msg-sender" onClick={(e) => profileBtn(e.currentTarget)} disabled={!first.senderId}>
+              {sender}
+            </button>
+            <span className="msg-time">{formatTime(first.sentAt)}</span>
+          </div>
+        )}
+        <PhotoAlbum messages={ms} />
+        <div className="album-meta muted small">사진 {ms.length}장</div>
+      </div>
+      <div className="msg-actions" role="toolbar" aria-label="사진 묶음 동작">
+        {canReply && (
+          <button title="답장" aria-label="답장" onClick={() => act.reply(first)}>
+            <Icon name="reply" size={15} />
+          </button>
+        )}
+        {mine && (
+          <button title={`사진 ${ms.length}장 삭제`} aria-label="묶음 삭제" className="danger" onClick={() => void removeAll()}>
+            <Icon name="trash" size={15} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+})
+
+interface ItemProps {
   m: Message
   mine: boolean
-  /** 이 내 메시지를 아직 이 앱에서 읽지 않은 사람 */
-  unreadIds: string[]
+  /** 이 내 메시지를 아직 이 앱에서 읽지 않은 사람 (쉼표로 이은 ID — 배열이면 매번 새 참조라 memo 가 깨진다) */
+  unreadKey: string
   grouped: boolean
   system: boolean
+  inThread: boolean
+  canReply: boolean
+  canStartThread: boolean
   editing: boolean
-  setEditing: (v: boolean) => void
   flash: boolean
+  highlighted: boolean
   replyRef: ReplyRef | null
-  onJump: (id: string) => void
-  onOpenProfile: (memberId: string, el: Element) => void
   isBookmarked: boolean
-  onToggleBookmark: () => void
-  onSendToWiki: () => void
+  act: Actions
 }
 
 function clockOf(iso: string | null): string {
@@ -359,28 +681,25 @@ function clockOf(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function MessageItem({
+const MessageItem = memo(function MessageItem({
   m,
   mine,
-  unreadIds,
+  unreadKey,
   grouped,
   system,
   inThread,
-  onReply,
-  onOpenThread,
-  onStartThread,
-  onChanged,
-  highlightId,
+  canReply,
+  canStartThread,
   editing,
-  setEditing,
   flash,
+  highlighted,
   replyRef,
-  onJump,
-  onOpenProfile,
   isBookmarked,
-  onToggleBookmark,
-  onSendToWiki
+  act
 }: ItemProps) {
+  const unreadIds = unreadKey ? unreadKey.split(',') : NO_IDS
+  const setEditing = (v: boolean) => act.setEditing(v ? m.id : null)
+  const onChanged = act.changed
   const nameOf = useMemberNames()
   const { toast } = useApp()
   const [draft, setDraft] = useState(m.text)
@@ -388,8 +707,8 @@ function MessageItem({
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (highlightId === m.id) ref.current?.scrollIntoView({ block: 'center' })
-  }, [highlightId, m.id])
+    if (highlighted) ref.current?.scrollIntoView({ block: 'center' })
+  }, [highlighted])
 
   useEffect(() => {
     if (editing) setDraft(m.text)
@@ -442,13 +761,13 @@ function MessageItem({
     return <div className="msg-system">{sys ? systemText(sys, nameOf) : m.text}</div>
   }
 
-  const profileBtn = (el: Element) => m.senderId && !isApp && onOpenProfile(m.senderId, el)
+  const profileBtn = (el: Element) => m.senderId && !isApp && act.openProfile(m.senderId, el)
 
   return (
     <div
       ref={ref}
       data-msg-id={m.id}
-      className={`msg ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''} ${highlightId === m.id || flash ? 'highlight' : ''} ${editing ? 'editing' : ''}`}
+      className={`msg ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''} ${highlighted || flash ? 'highlight' : ''} ${editing ? 'editing' : ''}`}
     >
       <div className="msg-gutter">
         {grouped ? (
@@ -472,7 +791,7 @@ function MessageItem({
             </span>
           </div>
         )}
-        {m.type === 'REPLY' && !deleted && <ReplyQuote refInfo={replyRef} onJump={onJump} />}
+        {m.type === 'REPLY' && !deleted && <ReplyQuote refInfo={replyRef} onJump={act.jump} />}
         {editing ? (
           <div className="msg-edit">
             <textarea
@@ -512,7 +831,7 @@ function MessageItem({
         {!editing && !deleted && previewUrl && <LinkPreviewCard url={previewUrl} />}
         {m.file && <FileAttachment message={m} />}
         {m.thread && !inThread && (
-          <button className="thread-chip" onClick={() => onOpenThread?.(m)}>
+          <button className="thread-chip" onClick={() => act.openThread(m)}>
             <Icon name="thread" size={14} />
             {topic?.project && <span className="tag">{topic.project}</span>}
             <span>스레드 {m.thread.totalCount}개</span>
@@ -544,20 +863,13 @@ function MessageItem({
       )}
       {!editing && !deleted && (
         <div className="msg-actions" role="toolbar" aria-label="메시지 동작">
-          {onReply && (
-            <button
-              title="답장"
-              aria-label="답장"
-              onClick={() => {
-                notePendingReply(m)
-                onReply(m)
-              }}
-            >
+          {canReply && (
+            <button title="답장" aria-label="답장" onClick={() => act.reply(m)}>
               <Icon name="reply" size={15} />
             </button>
           )}
-          {!inThread && !m.thread && onStartThread && (
-            <button title="스레드로 답하기" aria-label="스레드로 답하기" onClick={() => onStartThread(m)}>
+          {canStartThread && !m.thread && (
+            <button title="스레드로 답하기" aria-label="스레드로 답하기" onClick={() => act.startThread(m)}>
               <Icon name="thread" size={15} />
             </button>
           )}
@@ -566,11 +878,11 @@ function MessageItem({
             aria-label={isBookmarked ? '북마크 빼기' : '북마크'}
             aria-pressed={isBookmarked}
             className={isBookmarked ? 'on' : ''}
-            onClick={onToggleBookmark}
+            onClick={() => act.toggleBookmark(m)}
           >
             <ChatIcon name={isBookmarked ? 'bookmarkFill' : 'bookmark'} size={15} />
           </button>
-          <button title="위키로 보내기" aria-label="위키로 보내기" onClick={onSendToWiki}>
+          <button title="위키로 보내기" aria-label="위키로 보내기" onClick={() => act.sendToWiki(m)}>
             <ChatIcon name="wiki" size={15} />
           </button>
           {m.text && (
@@ -592,7 +904,7 @@ function MessageItem({
       )}
     </div>
   )
-}
+})
 
 function ReplyQuote({ refInfo, onJump }: { refInfo: ReplyRef | null; onJump: (id: string) => void }) {
   const nameOf = useMemberNames()

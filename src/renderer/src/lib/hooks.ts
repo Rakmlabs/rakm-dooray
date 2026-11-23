@@ -78,6 +78,8 @@ export function useChannelLogs(channelId: string | null, active: boolean, initia
   const rerun = useRef(false)
   const current = useRef(channelId)
   current.current = channelId
+  const includeIdRef = useRef(includeId)
+  includeIdRef.current = includeId
 
   const load = useCallback(
     async (quiet = false) => {
@@ -93,10 +95,10 @@ export function useChannelLogs(channelId: string | null, active: boolean, initia
       try {
         const r = await call('shell:logs', channelId, serverSize, limit, includeId)
         if (current.current === channelId) {
-          setMessages((prev) => (sameList(prev, r.messages) ? prev : r.messages))
+          setMessages((prev) => reconcileMessages(prev, r.messages))
           setHasOlder(r.hasOlder)
           if (r.serverCount >= serverSize) setServerFull(true)
-          setError(r.error)
+          setError(r.error ? errorText(r.error) : null)
         }
       } catch (e) {
         if (current.current === channelId) setError(errorText(e))
@@ -149,6 +151,11 @@ export function useChannelLogs(channelId: string | null, active: boolean, initia
     setLimit((s) => s + 200)
   }, [hasOlder, serverFull])
 
+  /** 맨 아래로 돌아오면 불러올 범위를 처음 크기로 줄인다 (폴링 때마다 수천 개를 주고받지 않게) */
+  const trim = useCallback(() => {
+    setLimit((s) => (s > initialSize && !includeIdRef.current ? initialSize : s))
+  }, [initialSize])
+
   /** 이 메시지가 보이도록 불러온다 (검색 결과·알림에서 이동할 때) */
   const ensure = useCallback((id: string | null) => setIncludeId(id), [])
 
@@ -158,24 +165,43 @@ export function useChannelLogs(channelId: string | null, active: boolean, initia
     error,
     reload: () => load(true),
     loadMore,
+    trim,
     ensure,
     canLoadMore: hasOlder || (serverFull && !backfilled.current)
   }
 }
 
-function sameList(a: Message[], b: Message[]): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i]
-    const y = b[i]
-    if (
-      x.id !== y.id ||
-      x.text !== y.text ||
-      x.flags !== y.flags ||
-      x.thread?.totalCount !== y.thread?.totalCount ||
-      x.thread?.lastUpdatedAt !== y.thread?.lastUpdatedAt
-    )
-      return false
-  }
-  return true
+/** 바뀌지 않은 메시지는 이전 객체를 그대로 쓴다 → 메시지 하나만 바뀌어도 목록 전체를 다시 그리지 않는다 (React.memo). 전부 같으면 이전 배열 그대로. */
+export function reconcileMessages(prev: Message[], next: Message[]): Message[] {
+  if (prev.length === 0) return next
+  const byId = new Map<string, Message>()
+  for (const m of prev) byId.set(m.id, m)
+  let changed = prev.length !== next.length
+  const out = next.map((y, i) => {
+    const x = byId.get(y.id)
+    if (x && sameMessage(x, y)) {
+      if (!changed && prev[i] !== x) changed = true
+      return x
+    }
+    changed = true
+    return y
+  })
+  return changed ? out : prev
+}
+
+export function sameMessage(x: Message, y: Message): boolean {
+  return (
+    x.id === y.id &&
+    x.seq === y.seq &&
+    x.type === y.type &&
+    x.text === y.text &&
+    x.flags === y.flags &&
+    x.sentAt === y.sentAt &&
+    x.senderId === y.senderId &&
+    x.file?.id === y.file?.id &&
+    x.file?.name === y.file?.name &&
+    x.thread?.channelId === y.thread?.channelId &&
+    x.thread?.totalCount === y.thread?.totalCount &&
+    x.thread?.lastUpdatedAt === y.thread?.lastUpdatedAt
+  )
 }

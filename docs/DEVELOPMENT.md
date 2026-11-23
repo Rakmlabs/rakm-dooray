@@ -138,6 +138,19 @@ Electron 에는 알림 권한을 조회·요청하는 API 가 없고, `Notificat
   `osascript -e 'tell application "System Events" to tell process "Dock" to get value of attribute "AXStatusLabel" of UI element "RAKM Dooray" of list 1'`
 - `com.apple.ncprefs` 에는 사용자가 답한 앱만 있다. 항목이 없다고 "권한을 요청한 적 없음"은 아니다.
 
+## 성능 측정 (모의 서버)
+
+```sh
+node scripts/bench/seed-archive.mjs /tmp/bench-ud 30000      # 보관함에 '오래된 기록방' 오래된 메시지 3만 개
+SHELL_MOCK_ARRIVE_MS=0 node scripts/mock-dooray.mjs
+DOORAY_MOCK_BASE=http://127.0.0.1:8787 npx electron . --remote-debugging-port=9333 --user-data-dir=/tmp/bench-ud
+node scripts/bench/bench-ui.mjs 3000      # 방 열기·위로 3000개 불러오기·입력 지연·가만히 20초 긴 작업·메모리
+node scripts/bench/bench-db.mjs /tmp/bench-ud   # 보관함 쿼리 시간
+```
+
+`/tmp/bench-ud` 에는 모의 토큰(`mock-token`)이 저장된 설정이 있어야 한다 (한 번 앱을 켜서 넣는다).
+업로드 실패를 흉내 내려면 모의 서버를 `MOCK_UPLOAD_DELAY_MS=400 MOCK_UPLOAD_FAIL_EVERY=5` 로 켠다.
+
 ## 구조
 
 ```

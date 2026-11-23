@@ -696,7 +696,7 @@ function ChannelPane({
   const [mode, setMode] = useState<ComposeMode>({ kind: 'normal' })
   const [newTopic, setNewTopic] = useState(false)
   const [gallery, setGallery] = useState(false)
-  const { messages, loading, error, reload, loadMore, canLoadMore, ensure } = useChannelLogs(channel.id, active, 100)
+  const { messages, loading, error, reload, loadMore, trim, canLoadMore, ensure } = useChannelLogs(channel.id, active, 100)
   // 읽음 확인: 대화 탭이 실제로 보일 때만 읽은 위치를 알린다
   useReportSeen(channel.id, messages, active && tab === 'chat')
   const threads = useMemo(() => collectThreads(messages), [messages])
@@ -741,7 +741,8 @@ function ChannelPane({
       setMode({ kind: 'normal' })
       await reload()
     } catch (e) {
-      toast(errorText(e))
+      // 일반 전송은 목록의 "보내지 못했습니다 · 다시 보내기" 로 알린다 (토스트를 겹쳐 띄우지 않는다)
+      if (mode.kind !== 'normal') toast(errorText(e))
       throw e
     }
   }
@@ -838,6 +839,8 @@ function ChannelPane({
             highlightId={focusMessageId}
             readMarkerAt={marker}
             loading={loading}
+            pendingKey={channel.id}
+            onTrim={trim}
           />
           <Composer
             placeholder={`${title}에 메시지 보내기`}
@@ -846,13 +849,7 @@ function ChannelPane({
             banner={banner}
             onCancelBanner={mode.kind === 'normal' ? undefined : () => setMode({ kind: 'normal' })}
             onSend={send}
-            onAttach={async () => {
-              try {
-                if (await call('messenger:uploadFile', channel.id)) await reload()
-              } catch (e) {
-                toast(errorText(e))
-              }
-            }}
+            pendingKey={channel.id}
           />
         </FileDropArea>
       ) : (
