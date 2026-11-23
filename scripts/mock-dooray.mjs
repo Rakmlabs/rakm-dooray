@@ -92,8 +92,14 @@ async function body(req) {
   }
 }
 
+// MOCK_LATENCY_MS: 모든 요청에 지연 (실제 두레이 왕복을 흉내 — 시작 시간 측정용). MOCK_REQ_LOG=1: 요청마다 시각·경로를 찍는다
+const LATENCY_MS = Number(process.env.MOCK_LATENCY_MS || 0)
+const REQ_LOG = !!process.env.MOCK_REQ_LOG
+const T0 = Date.now()
 createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`)
+  if (REQ_LOG) console.log(`[req] ${Date.now() - T0} ${req.method} ${url.pathname}${url.search}`)
+  if (LATENCY_MS) await new Promise((r) => setTimeout(r, LATENCY_MS))
   const p = url.pathname
   const send = (code, obj) => {
     res.writeHead(code, { 'content-type': 'application/json' })

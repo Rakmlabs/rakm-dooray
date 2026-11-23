@@ -26,4 +26,8 @@ export interface UpdateStatus {
   lastResult: string | null
   /** 재시작 준비 중 (위키 저장·읽음 위치 쓰기 마무리) */
   restarting: boolean
+  /** 받은 새 버전의 변경점 (GitHub 릴리스 노트를 줄 단위 글로). 없으면 빈 배열 */
+  notes: string[]
+  /** 릴리스 페이지 주소 (없으면 null) */
+  notesUrl: string | null
 }

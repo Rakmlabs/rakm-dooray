@@ -1,6 +1,6 @@
 {
   "name": "dooray-client",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "license": "MIT",
   "description": "RAKM 두레이 — NHN Dooray 커스텀 데스크톱 클라이언트 (메신저, 위키)",
@@ -14,6 +14,7 @@
     "probe": "node scripts/probe-readonly.mjs",
     "dist": "node scripts/build-native.mjs && electron-vite build && electron-builder --mac --arm64",
     "release": "node scripts/release.mjs",
+    "release:publish": "node scripts/publish.mjs",
     "build:native": "node scripts/build-native.mjs"
   },
   "build": {

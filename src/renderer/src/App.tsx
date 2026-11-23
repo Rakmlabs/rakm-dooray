@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from './state'
 import { call, onEvent } from './api'
 import { MessengerView } from './views/Messenger'
-import { WikiView } from './views/Wiki'
-import { MailView } from './views/Mail'
-import { SettingsView } from './views/Settings'
+// 메신저 밖 화면은 처음 열 때 불러온다 (위키 편집기 tiptap/prosemirror 가 시작 번들의 절반). 켠 뒤 한가할 때 미리 받아 둔다
+const loadWiki = () => import('./views/Wiki')
+const loadMail = () => import('./views/Mail')
+const loadSettings = () => import('./views/Settings')
+const WikiView = lazy(() => loadWiki().then((m) => ({ default: m.WikiView })))
+const MailView = lazy(() => loadMail().then((m) => ({ default: m.MailView })))
+const SettingsView = lazy(() => loadSettings().then((m) => ({ default: m.SettingsView })))
+/** 불러오는 동안 자리만 (화면이 밀리지 않게 view 크기 그대로, 글자 없음) */
+const ViewFallback = () => <div className="view-fallback" aria-busy="true" />
 import { Icon, type IconName } from './components/Icon'
 import { navigate, onNav, type NavRequest } from './lib/nav'
 import { QuickSwitcher } from './shell/QuickSwitcher'
@@ -14,6 +20,7 @@ import { onOpenSearch } from './shell/overlay'
 import { BookmarksPanel } from './components/chat/BookmarksPanel'
 import rakmTile from './assets/rakm-app-tile.png'
 import { UpdateBar } from './components/UpdateSettings'
+import { useUpdates } from './lib/updates'
 import { NotifyPermissionBar } from './shell/NotifyPermissionBar'
 
 type Tab = 'messenger' | 'mail' | 'wiki' | 'settings'
@@ -28,6 +35,7 @@ type Overlay = { kind: 'quick' } | { kind: 'bookmarks' } | { kind: 'search'; q: 
 
 export function App() {
   const { settings, realtime, shell, updateShell, unread, connection } = useApp()
+  const updateReady = useUpdates()?.state === 'ready'
   const [tab, setTab] = useState<Tab>('messenger')
   // 한 번 연 화면은 숨겨 두기만 해서 스크롤·선택 상태를 유지한다
   const [opened, setOpened] = useState<Set<Tab>>(new Set(['messenger']))
@@ -38,6 +46,13 @@ export function App() {
   const restored = useRef(false)
   const tabRef = useRef(tab)
   tabRef.current = tab
+
+  // 켠 뒤 한가할 때 다른 화면 코드를 미리 받아 둔다 (처음 누를 때 기다리지 않게). 메신저 첫 화면을 먼저 그린 다음
+  useEffect(() => {
+    const ric = window.requestIdleCallback ?? ((f: () => void) => window.setTimeout(f, 1500))
+    const id = window.setTimeout(() => ric(() => void Promise.all([loadWiki(), loadMail(), loadSettings()]).catch(() => {})), 4000)
+    return () => window.clearTimeout(id)
+  }, [])
 
   useEffect(() => {
     if (settings && settings.dooray.tokenSource === 'none') setTab('settings')
@@ -189,6 +204,7 @@ export function App() {
         >
           <Icon name="gear" />
           <span>설정</span>
+          {updateReady && <span className="rail-dot" aria-label="새 버전 준비됨" />}
         </button>
       </nav>
       <main className="workspace">
@@ -207,17 +223,23 @@ export function App() {
           )}
           {opened.has('mail') && (
             <section className="view" hidden={tab !== 'mail'}>
-              <MailView active={tab === 'mail'} />
+              <Suspense fallback={<ViewFallback />}>
+                <MailView active={tab === 'mail'} />
+              </Suspense>
             </section>
           )}
           {opened.has('wiki') && (
             <section className="view" hidden={tab !== 'wiki'}>
-              <WikiView />
+              <Suspense fallback={<ViewFallback />}>
+                <WikiView />
+              </Suspense>
             </section>
           )}
           {tab === 'settings' && (
             <section className="view">
-              <SettingsView />
+              <Suspense fallback={<ViewFallback />}>
+                <SettingsView />
+              </Suspense>
             </section>
           )}
         </div>

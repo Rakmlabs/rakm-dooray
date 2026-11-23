@@ -65,6 +65,7 @@ export function shellAreaHandlers(_ctx: MainContext): HandlersFor<ShellAreaContr
     'shell:summaries': async () => need().summaries(),
     'shell:search': async (query, channelId) => {
       const s = need()
+      if (s.search) return s.search.search(query, channelId)
       return {
         messages: s.archive?.searchMessages(query, channelId) ?? [],
         wiki: channelId ? [] : (s.archive?.searchWiki(query) ?? [])

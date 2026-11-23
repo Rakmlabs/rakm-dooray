@@ -1,4 +1,4 @@
-import { app, Notification } from 'electron'
+import { app, Notification, powerMonitor } from 'electron'
 import { join } from 'node:path'
 import type { Channel, Member, Message, WikiPage, WikiPageSummary } from '@shared/types'
 import type { IpcEventName, IpcEvents } from '@shared/ipc'
@@ -9,6 +9,7 @@ import type { WikiApi } from '../dooray/wiki'
 import { dataDir, jsonStore } from '../store'
 import { mockBase } from '../settings'
 import { LocalArchive, previewText } from './archive'
+import { ArchiveSearch } from './search'
 import { normalizeState, notifiable } from './rules'
 import type { NotifyPermissionTracker } from './notify-permission'
 
@@ -34,10 +35,13 @@ export interface ShellDeps {
 }
 
 // 모의 서버로 화면을 확인할 때(개발 전용)는 빨리 돈다
-const FAST = !app.isPackaged && !!mockBase()
+const FAST = !app.isPackaged && !!mockBase() && !process.env.RAKM_REAL_TIMING
 const TICK_MS = FAST ? 4_000 : 15_000
 const CHANNELS_TTL = FAST ? 3_000 : 25_000
 const GAP_MS = 400
+/** 자리를 비웠을 때(화면 잠금·10분 넘게 입력 없음)는 돌아가며 훑기를 1분에 한 번만. 실시간 이벤트로 바뀐 방은 그대로 바로 본다 */
+const AWAY_TICK_MS = 60_000
+const AWAY_IDLE_S = 600
 const WIKI_GAP_MS = 1_200
 const WIKI_RECRAWL_MS = 6 * 60 * 60 * 1000
 
@@ -45,6 +49,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 export class ShellService {
   archive: LocalArchive | null = null
+  /** 보관함 검색 (작업 스레드) */
+  search: ArchiveSearch | null = null
   archiveError: string | null = null
   private readonly stateFile = jsonStore<unknown>('shell-state.json', {})
   state: ShellState = normalizeState({})
@@ -71,7 +77,9 @@ export class ShellService {
   start(): void {
     this.state = normalizeState(this.stateFile.read())
     try {
-      this.archive = new LocalArchive(join(dataDir('local'), 'archive.db'))
+      const path = join(dataDir('local'), 'archive.db')
+      this.archive = new LocalArchive(path)
+      this.search = new ArchiveSearch(path, () => this.archive)
       const last = this.archive.kv('lastWikiPage')
       const base = Number(this.archive.kv('unreadBaseline'))
       if (Number.isFinite(base) && base > 0) this.baselineMs = base
@@ -90,6 +98,8 @@ export class ShellService {
   stop(): void {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
+    this.search?.stop()
+    this.search = null
     try {
       this.archive?.close()
     } catch {
@@ -356,8 +366,23 @@ export class ShellService {
 
   // ---------- 뒤에서 훑기 ----------
 
+  private lastScanAt = 0
+
+  private away(): boolean {
+    try {
+      return powerMonitor.getSystemIdleState(AWAY_IDLE_S) !== 'active'
+    } catch {
+      return false
+    }
+  }
+
   private async tick(): Promise<void> {
     this.timer = null
+    if (!this.firstScan && this.dirty.size === 0 && Date.now() - this.lastScanAt < AWAY_TICK_MS && this.away()) {
+      this.timer = setTimeout(() => void this.tick(), TICK_MS)
+      return
+    }
+    this.lastScanAt = Date.now()
     try {
       await this.meId()
       const channels = await this.channelList()

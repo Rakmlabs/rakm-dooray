@@ -83,20 +83,36 @@ CI 는 없다. 이 Mac 에서 `npm run release` 한 줄로 만들고, GitHub 릴
 
 ```sh
 npm version 0.2.0 --no-git-tag-version          # package.json 버전 (앱 버전·업데이트 비교 기준)
-git commit -am "chore: v0.2.0"
-npm run release                                 # '공증: 완료', zip 안 앱의 spctl 'Notarized Developer ID' 확인
-git tag v0.2.0 && git push origin main v0.2.0
-gh release create v0.2.0 release/RAKM-Dooray-0.2.0-arm64.dmg release/RAKM-Dooray-0.2.0-arm64.zip release/latest-mac.yml \
-  release/*.blockmap --repo Rakmlabs/rakm-dooray --title "RAKM 두레이 0.2.0" --notes "바뀐 점 …" --latest
+$EDITOR docs/releases/0.2.0.md                  # 사람이 읽는 한국어 변경점 (아래 '릴리스 노트')
+git commit -am "release: v0.2.0"
+npm run release                                 # 노트 확인 → 검사·빌드·서명·공증·staple·검증
+git push origin HEAD:main
+npm run release:publish                         # 태그 → GitHub 릴리스(노트=docs/releases) → latest-mac.yml 확인 → 두레이 공지
 ```
+
+`npm run release:publish -- --dry-run` 은 아무것도 올리지 않고 할 일과 두레이에 보낼 글만 보여 준다.
+`-- --announce` 는 이미 게시한 버전의 두레이 공지만 다시 보낸다.
+
+**릴리스 노트** (`docs/releases/<버전>.md`, 없으면 `npm run release` 가 시작하자마자 멈춘다)
+- 받는 사람이 읽는 한국어로 쓴다. 커밋 메시지·파일 이름·함수 이름을 옮기지 않는다. "무엇이 어떻게 달라졌는지"를 쓴다.
+- 첫 줄은 자동 설치 안내 한 문장, 그 아래 `## 제목` 문단과 `- ` 목록. TODO·작성 중 표시가 있으면 멈춘다.
+- 이 글이 세 군데에 그대로 보인다: GitHub 릴리스 페이지, **앱의 새 버전 알림 카드**(제목·목록 앞 6줄), 두레이 공지.
+
+**두레이 공지** (선택): 저장소 밖 `~/.config/sinawi/release.env` 에 `DOORAY_RELEASE_WEBHOOK=https://hook.dooray.com/services/…` 를 넣으면
+`release:publish` 가 끝날 때 그 대화방에 "RAKM 두레이 vX 출시 + 변경점 + 링크"를 올린다. 없으면 건너뛴다. URL 은 출력·로그에 남기지 않는다.
+- 웹훅 만들기: 두레이 메신저에서 공지할 대화방 → 대화방 설정(⚙) → **서비스 연동** → **Incoming** 추가(봇 이름 예: "RAKM 두레이 릴리스") → 만들어진 **연동 URL** 복사.
+- 보내는 형식(Incoming 웹훅 JSON): `{ botName, text, attachments: [{ title, titleLink, text, color }] }` (`scripts/lib/announce.mjs`).
 
 받는 사람: 처음 한 번은 dmg 를 열어 앱을 "응용 프로그램" 으로 끌어 놓고 실행 → 설정에서 자기 두레이 개인 API 토큰 입력.
 데이터 폴더는 개발·배포 빌드 모두 `~/Library/Application Support/dooray-client` 라 새 버전이 들어와도 토큰과 받아 둔 메시지가 남는다.
 
 ### 자동 업데이트
 
-- `electron-updater` (맥은 Squirrel.Mac). 앱을 켜고 15초 뒤, 그 뒤 4시간마다 `latest-mac.yml` 을 확인하고 새 버전 zip 을 뒤에서 받는다.
-- 다 받으면 화면 위에 "새 버전 x.y.z 준비됨 · 재시작" 띠가 뜨고, 설정 > 업데이트에도 같은 버튼이 있다.
+- `electron-updater` (맥은 Squirrel.Mac). 앱을 켜고 15초 뒤, 그 뒤 15분마다, 그리고 창에 돌아올 때·잠자기에서 깰 때(직전 확인이 5분보다 오래됐으면)
+  `latest-mac.yml` 을 확인하고 새 버전 zip 을 뒤에서 받는다. GitHub 피드는 `releases.atom` + `latest-mac.yml` 받기(API 아님)라 레이트리밋 걱정이 없다.
+- 다 받으면 macOS 알림("RAKM 두레이 vX 출시", 변경점 앞 3줄)과 오른쪽 위 알림 카드(변경점, [지금 재시작] [나중에])가 뜬다.
+  카드는 떠 있어서 화면을 밀지 않고, 입력 중이면 손을 뗀 뒤(4초) 뜨며 포커스를 가져가지 않는다. "나중에"는 그 버전만 다시 띄우지 않고 설정 아이콘에 점을 남긴다.
+  변경점은 GitHub 릴리스 노트(= `docs/releases/<버전>.md`)를 줄 글로 바꾼 것 (`releaseNotesText`).
   재시작 전에 보류 중인 위키 자동 저장과 읽음 위치 쓰기를 끝낸다. 재시작하지 않으면 다음에 앱을 끌 때 설치된다.
 - 받은 zip 은 Squirrel.Mac 이 **지금 앱과 같은 Developer ID(팀) 서명인지** 확인한 뒤에만 바꿔 끼운다 (끄지 않는다). 피드에는 서명·공증된 zip 만 올린다.
 - 오류는 화면에 띄우지 않고 `userData/logs/updates.log` 에 남긴다. 설정 > 업데이트에 마지막 확인 시각·결과와 "지금 확인" 버튼이 있다.
@@ -122,7 +138,7 @@ node scripts/test-build.mjs --version 0.0.2 --out /tmp/tb/v2 --mock http://127.0
   소유자 앱의 토큰·데이터·알림 권한을 건드리지 않는다. 모의 서버·피드 주소(로컬만)를 빌드에 박는다 (업데이트로 다시 켜질 때 실행 인자가 사라지므로).
 - 서명은 하고 공증은 안 한다. **`~/Applications` 처럼 정식 앱 폴더에 두고 `open` 으로 연다** — 임시 폴더(`/tmp`)에 둔 앱은 macOS 가 알림 권한 요청을 거절한다.
 - 업데이트 흐름: `node scripts/mock-dooray.mjs` (PORT=8790) 와 아무 정적 서버로 `/feed/` 에 v2 의 `latest-mac.yml`·zip 을 두고, v1 을 켜면
-  확인 → 받기 → "준비됨" 띠 → 재시작 → 0.0.2 로 다시 켜진다.
+  확인 → 받기 → 알림 카드 → 재시작 → 0.0.2 로 다시 켜진다. `--notes docs/releases/<버전>.md` 를 주면 로컬 피드에도 변경점이 들어가 카드에 보인다.
 
 ### 알림 권한 모듈 (`native/notify.mm`)
 
@@ -149,6 +165,17 @@ node scripts/bench/bench-db.mjs /tmp/bench-ud   # 보관함 쿼리 시간
 ```
 
 `/tmp/bench-ud` 에는 모의 토큰(`mock-token`)이 저장된 설정이 있어야 한다 (한 번 앱을 켜서 넣는다).
+
+채팅 밖 전체 (시작·탭·⌘K·유휴 CPU·장시간 메모리) — 앱을 직접 켜서 잰다:
+
+```sh
+npx electron-vite build
+node scripts/bench/bench-app.mjs /tmp/bench-ud 60 150   # 유휴 60초, 방·탭 전환 150번
+```
+
+- 모의 서버에서는 뒤 수집기가 빨리 돈다(4초). 실제 주기로 재려면 앱을 `RAKM_REAL_TIMING=1` 로 켠다.
+- 실제 두레이 왕복을 흉내 내려면 모의 서버를 `MOCK_LATENCY_MS=150` 으로, 요청 순서를 보려면 `MOCK_REQ_LOG=1` 로 켠다.
+- 창이 가려져 있으면 Chromium 이 그리기를 멈춰 애니메이션·전환 이벤트가 쌓인다 — 장시간 메모리는 창이 보이는 상태(`soak.visibility: visible`)에서만 비교한다.
 업로드 실패를 흉내 내려면 모의 서버를 `MOCK_UPLOAD_DELAY_MS=400 MOCK_UPLOAD_FAIL_EVERY=5` 로 켠다.
 
 ## 구조

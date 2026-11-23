@@ -13,6 +13,8 @@ export default defineConfig({
   },
   renderer: {
     resolve: { alias: { '@shared': resolve('src/shared') } },
-    plugins: [react()]
+    plugins: [react()],
+    // electron-vite 는 렌더러도 기본으로 압축하지 않는다. 시작할 때 파싱·컴파일할 양을 줄인다 (업데이트 직후 첫 실행이 특히)
+    build: { minify: true }
   }
 })

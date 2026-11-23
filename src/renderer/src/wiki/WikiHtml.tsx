@@ -30,10 +30,13 @@ export function WikiHtml({ html, wikiId, pageId, className }: { html: string; wi
   const ref = useRef<HTMLDivElement>(null)
   const safe = useMemo(() => html.replace(/<img([^>]*?)\ssrc="(?!data:|blob:)([^"]*)"/g, '<img$1 data-wk-src="$2"'), [html])
   // (HTML 블록 안의 <img src> 는 살균 단계에서 이미 요청될 수 있다 — 원문 HTML 이라 막지 않는다)
+  // 이미지는 화면 가까이 올 때 받는다 (사진이 많은 페이지를 열 때 한꺼번에 받지 않게)
   useEffect(() => {
     let alive = true
-    for (const img of Array.from(ref.current?.querySelectorAll<HTMLImageElement>('img[data-wk-src]') ?? [])) {
+    const load = (img: HTMLImageElement) => {
       const src = img.getAttribute('data-wk-src') ?? ''
+      img.removeAttribute('data-wk-src')
+      img.decoding = 'async'
       call('wiki:image', wikiId, pageId, src)
         .then((u) => {
           if (!alive) return
@@ -42,8 +45,27 @@ export function WikiHtml({ html, wikiId, pageId, className }: { html: string; wi
         })
         .catch(() => {})
     }
+    const imgs = Array.from(ref.current?.querySelectorAll<HTMLImageElement>('img[data-wk-src]') ?? [])
+    if (typeof IntersectionObserver === 'undefined') {
+      imgs.forEach(load)
+      return () => {
+        alive = false
+      }
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue
+          io.unobserve(e.target)
+          load(e.target as HTMLImageElement)
+        }
+      },
+      { rootMargin: '800px 0px' }
+    )
+    imgs.forEach((i) => io.observe(i))
     return () => {
       alive = false
+      io.disconnect()
     }
   }, [safe, wikiId, pageId])
   return <div ref={ref} className={className} dangerouslySetInnerHTML={{ __html: safe }} />

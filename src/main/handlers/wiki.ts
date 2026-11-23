@@ -10,7 +10,8 @@ import type { HandlersFor, MainContext } from './types'
 
 const MAX_BACKUPS_PER_PAGE = 20
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024
-const IMAGE_CACHE_LIMIT = 80
+/** 본문 이미지 캐시 (data: URL 문자열) 상한: 개수가 아니라 크기로. 예전 80개 상한은 큰 사진이면 GB 단위까지 갈 수 있었다 */
+const IMAGE_CACHE_BYTES = 64 * 1024 * 1024
 
 function backupFile(pageId: string): string {
   return join(dataDir('wiki-backups'), `${pageId.replace(/[^A-Za-z0-9_-]/g, '_')}.json`)
@@ -45,6 +46,22 @@ export function sniffImage(bytes: Buffer, contentType: string | null): string | 
 }
 
 const imageCache = new Map<string, string>()
+let imageCacheBytes = 0
+function putImage(key: string, url: string): void {
+  const old = imageCache.get(key)
+  if (old !== undefined) {
+    imageCache.delete(key)
+    imageCacheBytes -= old.length
+  }
+  imageCache.set(key, url)
+  imageCacheBytes += url.length
+  // 오래된 것부터 (Map 은 넣은 순서) 상한 안으로. 방금 넣은 것은 남긴다
+  for (const [k, v] of imageCache) {
+    if (imageCacheBytes <= IMAGE_CACHE_BYTES || k === key) break
+    imageCache.delete(k)
+    imageCacheBytes -= v.length
+  }
+}
 let pendingSave = false
 let flushWaiter: (() => void) | null = null
 let quitting = false
@@ -84,15 +101,19 @@ export function wikiAreaHandlers(ctx: MainContext): HandlersFor<WikiAreaContract
       if (!ref) return null
       const key = `${wikiId}|${pageId}|${src}`
       const hit = imageCache.get(key)
-      if (hit) return hit
+      if (hit) {
+        // 최근에 쓴 것을 뒤로 (LRU)
+        imageCache.delete(key)
+        imageCache.set(key, hit)
+        return hit
+      }
       const file =
         ref.kind === 'attach' ? await ctx.wiki.downloadAttachFile(ref.wikiId, ref.attachFileId) : await ctx.wiki.downloadFile(wikiId, pageId, ref.fileId)
       if (file.bytes.length > MAX_IMAGE_BYTES) return null
       const mime = sniffImage(file.bytes, file.contentType)
       if (!mime) return null
       const url = `data:${mime};base64,${file.bytes.toString('base64')}`
-      imageCache.set(key, url)
-      if (imageCache.size > IMAGE_CACHE_LIMIT) imageCache.delete(imageCache.keys().next().value!)
+      putImage(key, url)
       return url
     },
     'wiki:uploadImage': async (wikiId, pageId, name, mimeType, bytes) => {
@@ -105,7 +126,7 @@ export function wikiAreaHandlers(ctx: MainContext): HandlersFor<WikiAreaContract
       const fileId = r.attachFileId || r.id
       if (!fileId) throw new Error('업로드 응답에 파일 ID 가 없습니다.')
       const src = `/wikis/${wikiId}/files/${fileId}`
-      imageCache.set(`${wikiId}|${pageId}|${src}`, `data:${sniffImage(buf, mimeType)};base64,${buf.toString('base64')}`)
+      putImage(`${wikiId}|${pageId}|${src}`, `data:${sniffImage(buf, mimeType)};base64,${buf.toString('base64')}`)
       return { src, name: r.name || safe }
     },
     'wiki:pendingSave': async (pending) => {

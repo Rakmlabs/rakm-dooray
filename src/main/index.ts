@@ -359,7 +359,8 @@ app.whenReady().then(() => {
     },
     markQuitting: () => {
       quitting = true
-    }
+    },
+    showWindow: () => void showWindow()
   })
   // 개발 실행에서도 Dock 에 RAKM 아이콘이 보이게 한다 (패키징하면 electron-builder 가 build/icon.png 를 쓴다)
   if (process.platform === 'darwin' && !app.isPackaged) {

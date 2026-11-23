@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ENV_FILE, loadCredentials, quiet, signingEnv, writeUpdateInfo } from './lib/mac-build.mjs'
+import { ENV_FILE, loadCredentials, quiet, readReleaseNotes, releaseNotesPath, signingEnv, writeUpdateInfo } from './lib/mac-build.mjs'
 
 const OUT = 'release'
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
@@ -31,6 +31,15 @@ function run(cmd, args, { env, secretArgs = [] } = {}) {
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64') {
   console.error('이 스크립트는 Apple Silicon Mac 에서만 돈다.')
+  process.exit(1)
+}
+
+// 릴리스 노트(사람이 읽는 한국어 변경점)가 먼저 있어야 한다. 앱의 새 버전 알림 카드와 두레이 공지가 이 글을 보여 준다
+try {
+  readReleaseNotes(pkg.version)
+  console.log(`릴리스 노트: ${releaseNotesPath(pkg.version)}`)
+} catch (e) {
+  console.error(e.message)
   process.exit(1)
 }
 
@@ -120,3 +129,4 @@ if (verifyFailed) {
   process.exit(1)
 }
 console.log(canNotarize ? '공증: 완료 (app·dmg staple)' : '공증: 안 됨 — 처음 열 때 시스템 설정 > 개인정보 보호 및 보안 > "그래도 열기" 필요')
+console.log(`\n다음: git push origin HEAD:main → npm run release:publish (태그·GitHub 릴리스·latest-mac.yml 확인·두레이 공지)`)

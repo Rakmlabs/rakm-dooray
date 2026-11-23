@@ -102,11 +102,20 @@ export class LocalArchive {
   readonly db: DatabaseSync
   private readonly st: Record<string, StatementSync>
 
-  constructor(path: string) {
-    this.db = new DatabaseSync(path)
-    this.db.exec('pragma journal_mode = wal; pragma synchronous = normal;')
-    this.db.exec(SCHEMA)
-    this.fixSystemText()
+  /** readOnly: 검색 작업 스레드용 두 번째 연결 (WAL 이라 쓰는 쪽과 동시에 읽어도 된다). 스키마·고치기는 하지 않는다 */
+  constructor(path: string, opts: { readOnly?: boolean } = {}) {
+    this.db = new DatabaseSync(path, opts.readOnly ? { readOnly: true } : {})
+    if (!opts.readOnly) {
+      this.db.exec('pragma journal_mode = wal; pragma synchronous = normal;')
+      this.db.exec(SCHEMA)
+      // 오래 열어 두는 연결: 쿼리 계획 통계를 필요할 때만 갱신 (SQLite 권장, 보통 1ms 안쪽)
+      this.db.exec('pragma optimize = 0x10002')
+      // 한 번만: 예전에는 열 때마다 전체를 훑어 30만 개에서 메인 프로세스를 100ms 넘게 막았다
+      if (this.db.prepare("select v from kv where k = 'fix:systemText'").get() === undefined) {
+        this.fixSystemText()
+        this.db.prepare("insert or replace into kv(k, v) values ('fix:systemText', '1')").run()
+      }
+    }
     const p = (sql: string) => this.db.prepare(sql)
     this.st = {
       get: p('select data from messages where channel_id = ? and id = ?'),

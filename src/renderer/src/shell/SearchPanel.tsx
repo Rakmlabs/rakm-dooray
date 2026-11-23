@@ -52,15 +52,21 @@ export function SearchPanel({
   useEffect(() => {
     const t = q.trim()
     if (!t) return setResult(null)
+    // 늦게 온 이전 검색 결과가 새 결과를 덮지 않게
+    let stale = false
     const id = window.setTimeout(() => {
       call('shell:search', t, only?.channelId ?? null)
         .then((r) => {
+          if (stale) return
           setResult(r)
           setError(null)
         })
-        .catch((e) => setError(errorText(e)))
+        .catch((e) => !stale && setError(errorText(e)))
     }, 180)
-    return () => window.clearTimeout(id)
+    return () => {
+      stale = true
+      window.clearTimeout(id)
+    }
   }, [q, only])
 
   useEffect(() => {

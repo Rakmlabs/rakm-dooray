@@ -66,7 +66,7 @@ const sha512 = (path) =>
  * electron-updater(맥)가 읽는 latest-mac.yml 을 만든다. 서명·공증·staple 이 끝난 "최종" zip 으로 계산해야 한다.
  * 맥 자동 업데이트는 zip 을 받아 Squirrel.Mac 이 서명을 확인한 뒤 바꿔 끼운다 (dmg 는 처음 설치용).
  */
-export async function writeUpdateInfo(outDir, version, zipName, dmgName = null) {
+export async function writeUpdateInfo(outDir, version, zipName, dmgName = null, notes = null) {
   const entry = async (name) => ({ name, sha512: await sha512(join(outDir, name)), size: statSync(join(outDir, name)).size })
   const zip = await entry(zipName)
   const files = [zip, ...(dmgName ? [await entry(dmgName)] : [])]
@@ -77,9 +77,25 @@ export async function writeUpdateInfo(outDir, version, zipName, dmgName = null) 
     `path: ${zip.name}`,
     `sha512: ${zip.sha512}`,
     `releaseDate: '${new Date().toISOString()}'`,
+    // 피드가 GitHub 면 앱은 릴리스 페이지 노트를 쓴다. 로컬 피드(시험 빌드)에서는 이 값을 쓴다
+    ...(notes ? ['releaseNotes: |', ...notes.replace(/\r/g, '').split('\n').map((l) => `  ${l}`)] : []),
     ''
   ].join('\n')
   const path = join(outDir, 'latest-mac.yml')
   writeFileSync(path, yml)
   return basename(path)
+}
+
+/** 사람이 읽는 한국어 릴리스 노트: docs/releases/<버전>.md. 없거나 비었거나 한국어가 아니면 오류 */
+export function releaseNotesPath(version) {
+  return join('docs', 'releases', `${version}.md`)
+}
+export function readReleaseNotes(version) {
+  const path = releaseNotesPath(version)
+  if (!existsSync(path)) throw new Error(`릴리스 노트가 없습니다: ${path} (사람이 읽는 한국어 변경점 — docs/DEVELOPMENT.md "릴리스" 참고)`)
+  const text = readFileSync(path, 'utf8').trim()
+  if (text.length < 40 || !/[가-힣]/.test(text)) throw new Error(`릴리스 노트가 너무 짧거나 한국어가 아닙니다: ${path}`)
+  if (/TODO|TBD|작성 중/.test(text)) throw new Error(`릴리스 노트에 TODO/작성 중 표시가 남아 있습니다: ${path}`)
+  if (!/^##\s/m.test(text)) throw new Error(`릴리스 노트에 "## 제목" 문단이 없습니다: ${path}`)
+  return text
 }

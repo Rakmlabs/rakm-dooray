@@ -1,5 +1,5 @@
 // 시험용 패키징 빌드: 알림 권한·자동 업데이트처럼 "서명된 패키징 앱"에서만 확인되는 것을 실제 앱과 섞이지 않게 시험한다.
-//   node scripts/test-build.mjs --version 0.0.1 --out <폴더> [--mock http://127.0.0.1:8790] [--feed http://127.0.0.1:8791/] [--variant 2]
+//   node scripts/test-build.mjs --version 0.0.1 --out <폴더> [--mock http://127.0.0.1:8790] [--feed http://127.0.0.1:8791/] [--variant 2] [--notes 노트.md]
 //   --variant N: 번들 ID·이름·userData 에 N 을 붙인다 (알림 권한을 "아직 결정 안 함"부터 다시 시험할 때. macOS 는 번들 ID 마다 권한을 기억한다)
 //
 // 실제 앱과 다른 점 (소유자의 /Applications 앱·토큰·데이터·알림 권한을 건드리지 않게):
@@ -11,6 +11,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { resolve, join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { loadCredentials, signingEnv, writeUpdateInfo } from './lib/mac-build.mjs'
 
 const arg = (name, fallback = null) => {
@@ -86,5 +87,7 @@ if (!zip || !existsSync(app)) {
   console.error('zip 또는 .app 을 찾지 못했습니다.')
   process.exit(1)
 }
-await writeUpdateInfo(out, version, zip)
+// --notes <파일>: 로컬 피드의 latest-mac.yml 에 releaseNotes 로 넣는다 (새 버전 알림 카드 시험용)
+const notesFile = arg('notes')
+await writeUpdateInfo(out, version, zip, null, notesFile ? readFileSync(notesFile, 'utf8') : null)
 console.log(`\n시험 빌드 ${version}:\n- ${app}\n- ${join(out, zip)}\n- ${join(out, 'latest-mac.yml')}`)
