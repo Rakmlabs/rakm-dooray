@@ -9,11 +9,34 @@
 //
 // 동시 업로드는 1개: 여러 개를 동시에 올리면 먼저 끝난 것부터 메시지가 생겨 순서가 섞인다. 429(요청 제한)는 http.ts 가 쉬었다 다시 보낸다.
 // 실패한 파일은 한 번 자동으로 다시 보내고, 그래도 안 되면 트레이에 남겨 눌러서 다시 보낼 수 있다. 나머지는 계속 올린다.
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { UPLOAD_MAX_BYTES, fileKind, mimeFromName, type FileKind } from '@shared/types-files'
 import { call, errorText } from '../../api'
 
 export const MAX_BATCH = 30
+
+// ---------- 올리는 동안 목록에서 잠시 숨기기 ----------
+// 사진을 한 장씩 올리면 목록의 앨범이 1→2→3장… 으로 자라며 격자가 계속 바뀐다 (레이아웃이 움직인다).
+// 그래서 이 방에 올리는 동안은 새로 들어온 내 첨부 메시지를 목록이 그리지 않고, 다 끝난 뒤 한 번에 최종 모양으로 보인다.
+// 진행은 입력창 트레이(높이 고정)에만 보인다.
+const holds = new Map<string, number>()
+const holdListeners = new Set<() => void>()
+function setHold(channelId: string, on: boolean): void {
+  const n = (holds.get(channelId) ?? 0) + (on ? 1 : -1)
+  if (n > 0) holds.set(channelId, n)
+  else holds.delete(channelId)
+  for (const l of holdListeners) l()
+}
+/** 이 방에 첨부를 올리는 중인지 */
+export function useUploadHold(channelId: string | null | undefined): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      holdListeners.add(cb)
+      return () => holdListeners.delete(cb)
+    },
+    () => !!channelId && holds.has(channelId)
+  )
+}
 /** 트레이 썸네일 높이 (px). 원본 대신 줄인 그림을 만들어 메모리를 아낀다 */
 const THUMB_PX = 128
 
@@ -104,7 +127,8 @@ export function useUploadQueueState({
 }: {
   channelId: string
   disabled: boolean
-  onUploaded: () => void
+  /** 다 올린 뒤 한 번 부른다 (목록 다시 받기). Promise 면 끝날 때까지 기다렸다가 숨김을 푼다 */
+  onUploaded: () => void | Promise<unknown>
   onNotice: (msg: string, kind?: 'info' | 'error') => void
 }): UploadQueue {
   const [items, setItems] = useState<UploadItem[]>([])
@@ -197,6 +221,8 @@ export function useUploadQueueState({
     if (running.current) return
     running.current = true
     const target = channelRef.current
+    let uploaded = 0
+    setHold(target, true)
     try {
       for (;;) {
         const next = itemsRef.current.find((x) => x.status === 'queued')
@@ -223,7 +249,7 @@ export function useUploadQueueState({
           })
           itemsRef.current = itemsRef.current.filter((i) => i.id !== next.id)
           setBatch((b) => (b ? { ...b, done: b.done + 1, doneBytes: b.doneBytes + next.file.size } : b))
-          if (channelRef.current === target) uploadedRef.current()
+          uploaded++
         } else {
           update(next.id, { status: 'error', error: err })
           itemsRef.current = itemsRef.current.map((i) => (i.id === next.id ? { ...i, status: 'error' as const, error: err ?? undefined } : i))
@@ -231,6 +257,9 @@ export function useUploadQueueState({
         }
       }
     } finally {
+      // 목록을 다 받은 뒤에 숨김을 풀어야 앨범이 한 번에 최종 모양으로 나온다
+      if (uploaded && channelRef.current === target) await Promise.resolve(uploadedRef.current()).catch(() => {})
+      setHold(target, false)
       running.current = false
       setBatch(null)
       const failed = itemsRef.current.filter((x) => x.status === 'error').length

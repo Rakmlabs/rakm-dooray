@@ -10,8 +10,9 @@ import { navigate } from '../lib/nav'
 import { parseTopic } from '../lib/projects'
 import { Icon } from './Icon'
 import { FileAttachment } from './files/FileAttachment'
+import { useUploadHold } from './files/uploadQueue'
 import { ALBUM_GAP_MS, PhotoAlbum, isAlbumPhoto } from './files/PhotoAlbum'
-import { removePending, usePending, type PendingSend } from './chat/pendingStore'
+import { arrivedPending, localId, removePending, rowKeyOf, usePending, type PendingSend } from './chat/pendingStore'
 import { Avatar } from './people/Avatar'
 import { useProfileCard } from './people/ProfileCard'
 import { ChatIcon } from './chat/ChatIcon'
@@ -153,7 +154,7 @@ export function buildRows(messages: Message[], markerId: string | null): Row[] {
         continue
       }
     }
-    rows.push({ kind: 'msg', key: m.id, m, day: showDay ? day : null, marker, grouped, system })
+    rows.push({ kind: 'msg', key: rowKeyOf(m.id), m, day: showDay ? day : null, marker, grouped, system })
     lastSender = system ? null : m.senderId
     lastTime = t
     lastHadThread = !!m.thread
@@ -212,7 +213,29 @@ export function MessageList(props: Props) {
     return first?.id ?? null
   }, [messages, readMarkerAt, meId])
 
-  const rows = useMemo(() => buildRows(messages, markerId), [messages, markerId])
+  // 보내는 중인 내 메시지: 진짜 메시지와 같은 줄로 맨 아래에 붙인다 (같은 묶기·날짜 규칙, 같은 모양·높이).
+  // 목록에 들어온 것은 이 렌더에서 바로 빼서 둘이 함께 보이는 순간이 없게 한다
+  // 이 방에 첨부를 올리는 중이면, 올리기 시작한 뒤 들어온 내 첨부는 다 끝날 때까지 그리지 않는다 (앨범이 한 장씩 자라며 격자가 바뀌지 않게)
+  const held = useUploadHold(props.pendingKey ? props.pendingKey.replace(/^thread:/, '') : channelId)
+  const knownAtHold = useRef<Set<string> | null>(null)
+  if (held && !knownAtHold.current) knownAtHold.current = new Set(messages.map((m) => m.id))
+  if (!held && knownAtHold.current) knownAtHold.current = null
+  const known = knownAtHold.current
+  const shownMessages = useMemo(
+    () => (known ? messages.filter((m) => known.has(m.id) || !m.file || !meId || m.senderId !== meId) : messages),
+    [messages, known, meId]
+  )
+  const arrived = useMemo(() => arrivedPending(pending, messages, meId), [pending, messages, meId])
+  const shownPending = useMemo(() => (arrived.size ? pending.filter((p) => !arrived.has(p.id)) : pending), [pending, arrived])
+  useEffect(() => {
+    for (const id of arrived) removePending(id)
+  }, [arrived])
+  const pendingById = useMemo(() => new Map(shownPending.map((p) => [localId(p), p])), [shownPending])
+  const withPending = useMemo(
+    () => (shownPending.length ? [...shownMessages, ...shownPending.map((p) => pendingMessage(p, meId, channelId))] : shownMessages),
+    [shownMessages, shownPending, meId, channelId]
+  )
+  const rows = useMemo(() => buildRows(withPending, markerId), [withPending, markerId])
 
   // ---------- 그릴 범위 (아래에서부터 windowRows 줄) ----------
   const [windowRows, setWindowRows] = useState(WINDOW_ROWS)
@@ -448,8 +471,6 @@ export function MessageList(props: Props) {
   const showEntry = props.showBookmarksEntry ?? !inThread
   const canReply = !!props.onReply
   const canStartThread = !inThread && !!props.onStartThread
-  const lastRow = rows[rows.length - 1]
-  const pendingGrouped = !!lastRow && lastRow.kind === 'msg' && !lastRow.system && !!meId && lastRow.m.senderId === meId
 
   return (
     <div className="messages" ref={scroller} onScroll={onScroll} onClick={rich.onClick} onKeyDown={rich.onKeyDown} data-total={messages.length}>
@@ -508,7 +529,7 @@ export function MessageList(props: Props) {
             <MessageItem
               m={r.m}
               mine={!!meId && r.m.senderId === meId}
-              unreadKey={receipts.enabled && meId && r.m.senderId === meId ? unreadBy(r.m, receiptMembers, receipts, laterBy).join(',') : ''}
+              unreadKey={receipts.enabled && meId && r.m.senderId === meId && !pendingById.has(r.m.id) ? unreadBy(r.m, receiptMembers, receipts, laterBy).join(',') : ''}
               grouped={r.grouped}
               system={r.system}
               inThread={!!inThread}
@@ -519,13 +540,11 @@ export function MessageList(props: Props) {
               highlighted={props.highlightId === r.m.id}
               replyRef={r.m.type === 'REPLY' ? (replyRefs.get(r.m.id) ?? null) : null}
               isBookmarked={bookmarked.has(bookmarkKey(r.m))}
+              pending={pendingById.get(r.m.id)}
               act={act}
             />
           )}
         </div>
-      ))}
-      {pending.map((p, i) => (
-        <PendingItem key={`p${p.id}`} p={p} meId={meId} grouped={i > 0 || pendingGrouped} />
       ))}
       </div>
       {(unseen > 0 || farFromBottom || below > 0) && (
@@ -557,38 +576,55 @@ function DrawerEsc({ onClose }: { onClose: () => void }) {
   return null
 }
 
-/** 보내는 중·보내지 못한 내 메시지 (낙관적 전송). 서버에 들어가 목록을 다시 받으면 사라지고 진짜 메시지로 바뀐다 */
-function PendingItem({ p, meId, grouped }: { p: PendingSend; meId: string | null; grouped: boolean }) {
-  const nameOf = useMemberNames()
-  const html = useMemo(() => renderMarkdown(p.text), [p.text])
-  const failed = p.status === 'failed'
+/** 보내는 중인 글 → 목록에 끼울 메시지 (서버가 준 것과 같은 모양) */
+function pendingMessage(p: PendingSend, meId: string | null, channelId: string | null): Message {
+  return {
+    id: localId(p),
+    channelId: channelId ?? '',
+    seq: 0,
+    type: 'TEXT',
+    senderId: meId,
+    senderType: 'member',
+    sentAt: new Date(p.at).toISOString(),
+    text: p.text,
+    flags: null,
+    file: null,
+    thread: null
+  }
+}
+
+/**
+ * 보내는 상태 (읽음 숫자 자리, 오른쪽 아래에 겹쳐 그린다 — 줄을 더하지 않는다).
+ * 금방 들어가면 아무것도 없고, 1초가 넘으면 작은 시계, 실패하면 빨간 느낌표 + 다시 보내기·지우기
+ */
+function SendState({ p }: { p: PendingSend }) {
+  if (p.status === 'sending') return null
+  if (p.status === 'slow') {
+    return (
+      <span className="send-state slow" role="status" title="보내는 중" aria-label="보내는 중">
+        <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M8 4.6V8l2.4 1.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      </span>
+    )
+  }
   return (
-    <div className={`msg mine pending ${grouped ? 'grouped' : ''} ${failed ? 'failed' : ''}`} aria-busy={!failed}>
-      <div className="msg-gutter">{!grouped && <Avatar memberId={meId} size={36} />}</div>
-      <div className="msg-main">
-        {!grouped && (
-          <div className="msg-head">
-            <span className="msg-sender">{(meId && nameOf(meId)) || '나'}</span>
-          </div>
-        )}
-        <div className="msg-body md" dangerouslySetInnerHTML={{ __html: html }} />
-        <div className="pending-state" role="status">
-          {failed ? (
-            <>
-              <span className="err">보내지 못했습니다{p.error ? ` — ${p.error}` : ''}</span>
-              <button className="link-like" onClick={() => void p.retry()}>
-                다시 보내기
-              </button>
-              <button className="link-like muted" onClick={() => removePending(p.id)}>
-                지우기
-              </button>
-            </>
-          ) : (
-            <span className="muted">보내는 중…</span>
-          )}
-        </div>
-      </div>
-    </div>
+    <span className="send-failed" role="alert">
+      <button className="send-retry" onClick={() => void p.retry()} title={p.error ? `보내지 못했습니다 — ${p.error}` : '보내지 못했습니다'}>
+        다시 보내기
+      </button>
+      <button className="send-discard" onClick={() => removePending(p.id)} title="이 글 지우기">
+        지우기
+      </button>
+      <span className="send-state failed" title={p.error ? `보내지 못했습니다 — ${p.error}` : '보내지 못했습니다'} aria-label="보내지 못했습니다">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="7" fill="currentColor" />
+          <path d="M8 4.3v4.4" stroke="#fff" strokeWidth="1.7" strokeLinecap="round" />
+          <circle cx="8" cy="11.4" r="1" fill="#fff" />
+        </svg>
+      </span>
+    </span>
   )
 }
 
@@ -672,6 +708,8 @@ interface ItemProps {
   highlighted: boolean
   replyRef: ReplyRef | null
   isBookmarked: boolean
+  /** 보내는 중인 내 메시지 (낙관적 전송) */
+  pending?: PendingSend
   act: Actions
 }
 
@@ -695,6 +733,7 @@ const MessageItem = memo(function MessageItem({
   highlighted,
   replyRef,
   isBookmarked,
+  pending,
   act
 }: ItemProps) {
   const unreadIds = unreadKey ? unreadKey.split(',') : NO_IDS
@@ -767,7 +806,8 @@ const MessageItem = memo(function MessageItem({
     <div
       ref={ref}
       data-msg-id={m.id}
-      className={`msg ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''} ${highlighted || flash ? 'highlight' : ''} ${editing ? 'editing' : ''}`}
+      className={`msg ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''} ${highlighted || flash ? 'highlight' : ''} ${editing ? 'editing' : ''}${pending ? ` pending ${pending.status}` : ''}`}
+      aria-busy={pending && pending.status !== 'failed' ? true : undefined}
     >
       <div className="msg-gutter">
         {grouped ? (
@@ -848,6 +888,7 @@ const MessageItem = memo(function MessageItem({
           {unreadIds.length}
         </span>
       )}
+      {pending && <SendState p={pending} />}
       {deletingThread && m.thread && (
         <ThreadDeleteDialog
           target={{ threadChannelId: m.thread.channelId, parentChannelId: m.channelId, root: m }}
@@ -861,7 +902,7 @@ const MessageItem = memo(function MessageItem({
           }}
         />
       )}
-      {!editing && !deleted && (
+      {!editing && !deleted && !pending && (
         <div className="msg-actions" role="toolbar" aria-label="메시지 동작">
           {canReply && (
             <button title="답장" aria-label="답장" onClick={() => act.reply(m)}>

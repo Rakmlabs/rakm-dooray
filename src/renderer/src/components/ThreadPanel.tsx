@@ -128,7 +128,7 @@ export function ThreadPanel({
           }}
         />
       )}
-      <FileDropArea channelId={threadId || `pending:${thread.root?.id ?? ''}`} onUploaded={() => void reload()} disabled={!threadId}>
+      <FileDropArea channelId={threadId || `pending:${thread.root?.id ?? ''}`} onUploaded={() => reload()} disabled={!threadId}>
       {pending ? (
         <div className="messages thread-pending">
           <div className="muted small center pad">첫 답글을 보내면 이 메시지에 스레드가 만들어집니다.</div>
@@ -153,7 +153,7 @@ export function ThreadPanel({
         draftKey={threadId ? `thread:${threadId}` : `thread-start:${thread.root?.id ?? ''}`}
         mentionChannelId={thread.parentChannelId}
         pendingKey={threadId ? `thread:${threadId}` : undefined}
-        onSend={async (text) => {
+        onSend={async (text, confirm) => {
           try {
             if (!threadId && thread.root) {
               const r = await call('messenger:threadFromMessage', thread.parentChannelId, thread.root.id, text)
@@ -166,7 +166,8 @@ export function ThreadPanel({
               setCreatedId(r.channelId)
               return
             }
-            await call('messenger:send', threadId!, text)
+            const r = await call('messenger:send', threadId!, text)
+            confirm?.(r.id)
             await reload()
           } catch (e) {
             if (!threadId) toast(errorText(e)) // 스레드 안 일반 답글은 목록에서 "보내지 못했습니다" 로 알린다

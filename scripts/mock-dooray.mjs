@@ -95,6 +95,9 @@ async function body(req) {
 // MOCK_LATENCY_MS: 모든 요청에 지연 (실제 두레이 왕복을 흉내 — 시작 시간 측정용). MOCK_REQ_LOG=1: 요청마다 시각·경로를 찍는다
 const LATENCY_MS = Number(process.env.MOCK_LATENCY_MS || 0)
 const REQ_LOG = !!process.env.MOCK_REQ_LOG
+// 메시지 보내기(POST .../logs) 만 느리게·실패하게 (보내는 중 표시 시험). 환경 변수로 시작값, 실행 중에는
+//   curl 'http://127.0.0.1:8787/__mock/send?delay=3000&fail=1'   (fail=1: 다음 보내기부터 실패, 0: 정상)
+const sendCtl = { delay: Number(process.env.MOCK_SEND_DELAY_MS || 0), fail: process.env.MOCK_SEND_FAIL === '1' }
 const T0 = Date.now()
 createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`)
@@ -105,11 +108,20 @@ createServer(async (req, res) => {
     res.writeHead(code, { 'content-type': 'application/json' })
     res.end(JSON.stringify(obj))
   }
+  if (p === '/__mock/send') {
+    if (url.searchParams.has('delay')) sendCtl.delay = Number(url.searchParams.get('delay')) || 0
+    if (url.searchParams.has('fail')) sendCtl.fail = url.searchParams.get('fail') === '1'
+    return send(200, sendCtl)
+  }
   // 두 번째 사용자(김공동)로 쓰려면 토큰 'mock-token-co' (읽음 확인을 두 앱으로 시험할 때)
   const USERS = { 'dooray-api mock-token': ME, 'dooray-api mock-token-co': 'm-co' }
   const actor = USERS[req.headers.authorization]
   if (!actor) return send(401, { header: { isSuccessful: false, resultCode: -1, resultMessage: '인증 실패' } })
   const state = { members, channels, logs, wikis, wikiPages, comments, ME: actor, BASE_ME: ME, log, iso, now }
+  if (req.method === 'POST' && /^\/messenger\/v1\/channels\/[^/]+\/logs$/.test(p)) {
+    if (sendCtl.delay) await new Promise((r) => setTimeout(r, sendCtl.delay))
+    if (sendCtl.fail) return send(500, { header: { isSuccessful: false, resultCode: -1, resultMessage: '모의 서버: 보내기 실패' } })
+  }
   // 영역별 경로가 먼저 (각 영역 작업자가 scripts/mock/*.mjs 에서만 고친다)
   for (const area of [wikiArea, filesArea, chatArea, shellArea]) {
     if (await area.handle({ req, res, url, p, send, ok, body, state })) return

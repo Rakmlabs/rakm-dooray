@@ -727,7 +727,7 @@ function ChannelPane({
     if (m.thread) onOpenThread({ threadChannelId: m.thread.channelId, parentChannelId: channel.id, root: m })
   }
 
-  async function send(text: string) {
+  async function send(text: string, confirm?: (serverId: string) => void) {
     try {
       if (mode.kind === 'reply') {
         const r = await call('messenger:reply', channel.id, mode.m.id, text)
@@ -736,7 +736,9 @@ function ChannelPane({
         const r = await call('messenger:threadFromMessage', channel.id, mode.m.id, text)
         onOpenThread({ threadChannelId: r.channelId, parentChannelId: channel.id, root: mode.m })
       } else {
-        await call('messenger:send', channel.id, text)
+        const r = await call('messenger:send', channel.id, text)
+        // 들어간 메시지 ID 를 목록을 다시 받기 전에 알린다 → 목록에 나타나는 그 순간 보내는 중 줄과 바꿔 끼운다
+        confirm?.(r.id)
       }
       setMode({ kind: 'normal' })
       await reload()
@@ -824,7 +826,7 @@ function ChannelPane({
       {error && <div className="banner banner-err">{error}</div>}
       {gallery && <FileGallery channelId={channel.id} messages={messages} onClose={() => setGallery(false)} />}
       {tab === 'chat' ? (
-        <FileDropArea channelId={channel.id} onUploaded={() => void reload()}>
+        <FileDropArea channelId={channel.id} onUploaded={() => reload()}>
           <MessageList
             messages={messages}
             meId={me?.id ?? null}

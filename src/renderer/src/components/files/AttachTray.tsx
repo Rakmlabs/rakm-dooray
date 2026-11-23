@@ -1,5 +1,6 @@
 // 파일 영역 소유. 입력창 안, 보내기 전 첨부 트레이 (Composer 가 그린다).
 // 썸네일 줄: 끌어서 순서 바꾸기, × 로 빼기, 실패한 것은 눌러 다시 보내기. 보내는 동안은 위에 진행 막대.
+// 메시지 전송과 같은 원칙: 1초 안에 끝나면 진행 표시가 보이지 않는다 (CSS 지연), 상태가 바뀌어도 머리줄·썸네일 크기는 그대로.
 // 높이는 고정(줄 하나 + 머리줄)이라 사진 수가 늘어도 입력창이 더 자라지 않는다 (옆으로 스크롤).
 import { useState } from 'react'
 import { formatSize } from '../../lib/format'
@@ -40,11 +41,10 @@ export function AttachTray({ q }: { q: UploadQueue }) {
         ) : (
           <span className="muted small">Enter 로 보내기 · 끌어서 순서 바꾸기</span>
         )}
-        {!q.busy && (
-          <button className="link-like small muted" onClick={q.clear}>
-            모두 빼기
-          </button>
-        )}
+        {/* 올리는 동안에도 자리는 남겨 둔다 (머리줄 글자가 옆으로 밀리지 않게) */}
+        <button className="link-like small muted" onClick={q.clear} disabled={q.busy} style={q.busy ? { visibility: 'hidden' } : undefined}>
+          모두 빼기
+        </button>
       </div>
       <ul
         className="tray-strip"

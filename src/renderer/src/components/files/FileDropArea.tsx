@@ -12,7 +12,7 @@ export function FileDropArea({
   disabled
 }: {
   channelId: string
-  onUploaded: () => void
+  onUploaded: () => void | Promise<unknown>
   children: ReactNode
   /** 아직 올릴 곳이 없을 때 (첫 답글 전의 스레드) */
   disabled?: boolean

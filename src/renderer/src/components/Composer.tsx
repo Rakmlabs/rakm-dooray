@@ -17,7 +17,8 @@ import { useUploadQueue } from './files/uploadQueue'
 
 interface Props {
   placeholder: string
-  onSend: (text: string) => Promise<void>
+  /** confirm: 서버가 메시지 ID 를 주면 목록을 다시 받기 전에 부른다 (보내는 중 표시를 진짜 메시지로 바로 바꿔 끼우려고) */
+  onSend: (text: string, confirm?: (serverId: string) => void) => Promise<void>
   onAttach?: () => Promise<void>
   banner?: ReactNode
   onCancelBanner?: () => void
@@ -280,7 +281,7 @@ function ComposerImpl({
     }
     const out = applyMentions(closeOpenFence(t), state.mentions, organizationId)
     if (pendingKey && !banner) {
-      // 낙관적 전송: 바로 비우고 목록에 "보내는 중" 으로. 글이 먼저, 첨부는 그 다음에 (순서를 지키려고 글이 들어간 뒤 올린다)
+      // 낙관적 전송: 바로 비우고 목록 맨 아래에 진짜 메시지 모양으로. 글이 먼저, 첨부는 그 다음에 (순서를 지키려고 글이 들어간 뒤 올린다)
       setState({ key, text: '', mentions: {} })
       saveDraft(key, { text: '', mentions: {} })
       const files = hasFiles
