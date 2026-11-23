@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { useMemberNames } from '../../state'
 import { formatTime } from '../../lib/format'
 import { navigate } from '../../lib/nav'
-import { Avatar } from '../people/Avatar'
+import { nameColorClass } from '../people/nameColor'
 import { ChatIcon } from './ChatIcon'
 import { plainSummary, useBookmarks } from './chatStore'
 
@@ -56,10 +56,9 @@ export function BookmarksPanel({ onClose, channelId }: { onClose: () => void; /*
               }}
               title="이 메시지로 가기"
             >
-              <Avatar memberId={b.senderId} size={28} />
               <span className="bookmark-main">
                 <span className="bookmark-meta">
-                  <b>{nameOf(b.senderId) ?? '…'}</b>
+                  <b className={nameColorClass(b.senderId)}>{nameOf(b.senderId) ?? '…'}</b>
                   <span className="muted small">{formatTime(b.sentAt)}</span>
                   {b.parentChannelId && <span className="tag small-tag">스레드</span>}
                 </span>

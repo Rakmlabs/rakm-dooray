@@ -616,9 +616,6 @@ hr {
 .msg-sender {
   font-weight: 700;
 }
-.msg.mine .msg-sender {
-  color: var(--accent);
-}
 .msg-time {
   font-size: 11.5px;
   color: var(--muted);

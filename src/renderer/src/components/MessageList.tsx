@@ -13,7 +13,7 @@ import { FileAttachment } from './files/FileAttachment'
 import { useUploadHold } from './files/uploadQueue'
 import { ALBUM_GAP_MS, PhotoAlbum, isAlbumPhoto } from './files/PhotoAlbum'
 import { arrivedPending, localId, removePending, rowKeyOf, usePending, type PendingSend } from './chat/pendingStore'
-import { Avatar } from './people/Avatar'
+import { nameColorClass } from './people/nameColor'
 import { EmojiPicker } from './chat/EmojiPicker'
 import { QUICK_REACTIONS, applyOptimistic, foldReactions, reactionText, settled, type OptimisticReaction, type ReactionGroup } from './chat/reactions'
 import { useProfileCard } from './people/ProfileCard'
@@ -699,22 +699,11 @@ const AlbumItem = memo(function AlbumItem({ ms, mine, grouped, canReply, act }: 
   }
 
   return (
-    <div className={`msg album-row ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''}`} data-msg-id={first.id}>
-      <div className="msg-gutter">
-        {grouped ? (
-          <span className="msg-hover-time" title={formatTime(first.sentAt)}>
-            {clockOf(first.sentAt)}
-          </span>
-        ) : (
-          <button className="avatar-btn" onClick={(e) => profileBtn(e.currentTarget)} aria-label={`${sender} 프로필`} disabled={!first.senderId}>
-            <Avatar memberId={first.senderId} size={36} />
-          </button>
-        )}
-      </div>
+    <div className={`msg album-row ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''}`} data-msg-id={first.id} title={grouped ? formatTime(first.sentAt) : undefined}>
       <div className="msg-main">
         {!grouped && (
           <div className="msg-head">
-            <button className="msg-sender" onClick={(e) => profileBtn(e.currentTarget)} disabled={!first.senderId}>
+            <button className={`msg-sender ${nameColorClass(first.senderId)}`} onClick={(e) => profileBtn(e.currentTarget)} disabled={!first.senderId}>
               {sender}
             </button>
             <span className="msg-time">{formatTime(first.sentAt)}</span>
@@ -759,12 +748,6 @@ interface ItemProps {
   reactions?: ReactionGroup[]
   meId: string | null
   act: Actions
-}
-
-function clockOf(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
 }
 
 const MessageItem = memo(function MessageItem({
@@ -860,21 +843,10 @@ const MessageItem = memo(function MessageItem({
       className={`msg ${grouped ? 'grouped' : ''} ${mine ? 'mine' : ''} ${highlighted || flash ? 'highlight' : ''} ${editing ? 'editing' : ''}${pending ? ` pending ${pending.status}` : ''}`}
       aria-busy={pending && pending.status !== 'failed' ? true : undefined}
     >
-      <div className="msg-gutter">
-        {grouped ? (
-          <span className="msg-hover-time" title={formatTime(m.sentAt)}>
-            {clockOf(m.sentAt)}
-          </span>
-        ) : (
-          <button className="avatar-btn" onClick={(e) => profileBtn(e.currentTarget)} aria-label={`${sender} 프로필`} disabled={!m.senderId || isApp}>
-            <Avatar memberId={isApp ? null : m.senderId} name={isApp ? '봇' : undefined} size={36} />
-          </button>
-        )}
-      </div>
-      <div className="msg-main">
+      <div className="msg-main" title={grouped && !editing ? formatTime(m.sentAt) : undefined}>
         {!grouped && (
           <div className="msg-head">
-            <button className="msg-sender" onClick={(e) => profileBtn(e.currentTarget)} disabled={!m.senderId || isApp}>
+            <button className={`msg-sender ${nameColorClass(isApp ? '봇' : m.senderId)}`} onClick={(e) => profileBtn(e.currentTarget)} disabled={!m.senderId || isApp}>
               {sender}
             </button>
             <span className="msg-time" title={m.sentAt ? new Date(m.sentAt).toLocaleString('ko-KR') : undefined}>
@@ -1054,8 +1026,7 @@ function ReplyQuote({ refInfo, onJump }: { refInfo: ReplyRef | null; onJump: (id
   return (
     <button className="reply-quote" onClick={() => onJump(refInfo.originalId)} title="원 메시지로 이동">
       <span className="reply-quote-who">
-        <Avatar memberId={refInfo.originalSenderId} size={16} />
-        <b>{nameOf(refInfo.originalSenderId) ?? '…'}</b>
+        <b className={nameColorClass(refInfo.originalSenderId)}>{nameOf(refInfo.originalSenderId) ?? '…'}</b>
       </span>
       <span className="reply-quote-text">{plainSummary(refInfo.originalText, 140) || '(내용 없음)'}</span>
     </button>

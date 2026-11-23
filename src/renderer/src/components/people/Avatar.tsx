@@ -2,6 +2,7 @@
 // 두레이 공식 멤버 API(GET /common/v1/members/{id})에는 프로필 사진 필드가 없다.
 // 그래서 이름 첫 글자 + 사람마다 고정된 색(멤버 ID 해시)으로 그린다. 색은 chat.css 의 .avatar.tone-N (라이트/다크).
 import { useMemberNames } from '../../state'
+import { nameColorIndex } from './nameColor'
 
 export const AVATAR_TONES = 8
 
@@ -37,10 +38,11 @@ export function Avatar({
 }) {
   const nameOf = useMemberNames()
   const n = name ?? nameOf(memberId) ?? ''
-  const tone = avatarTone(memberId ?? n ?? '?')
+  // 이름 색과 같은 색으로 칠한다 (같은 사람 = 같은 색)
+  const tone = nameColorIndex(memberId ?? n ?? '?')
   return (
     <span
-      className={`avatar tone-${tone}`}
+      className={`avatar nc-${tone}`}
       style={{ width: size, height: size, fontSize: Math.round(size * (initialsOf(n).length > 1 ? 0.36 : 0.44)) }}
       title={title}
       aria-hidden

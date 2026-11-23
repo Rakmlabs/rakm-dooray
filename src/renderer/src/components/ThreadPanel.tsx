@@ -10,7 +10,7 @@ import { useApp, useMemberNames } from '../state'
 import { MessageList, useRichContentClicks } from './MessageList'
 import { Composer } from './Composer'
 import { Icon } from './Icon'
-import { Avatar } from './people/Avatar'
+import { nameColorClass } from './people/nameColor'
 import { ChatIcon } from './chat/ChatIcon'
 import { FileDropArea } from './files/FileDropArea'
 import { ThreadDeleteDialog, ThreadMenu, setThreadHidden, threadDeleteMessage, useHiddenThreads } from './chat/threadActions'
@@ -90,10 +90,9 @@ export function ThreadPanel({
       {thread.root && (
         <div className="thread-root" onClick={rich.onClick} onKeyDown={rich.onKeyDown}>
           <div className="thread-root-head">
-            <button className="avatar-btn" onClick={(e) => thread.root?.senderId && rich.open(thread.root.senderId, e.currentTarget)} aria-label="프로필">
-              <Avatar memberId={thread.root.senderId} size={28} />
+            <button className={`msg-sender ${nameColorClass(thread.root.senderId)}`} onClick={(e) => thread.root?.senderId && rich.open(thread.root.senderId, e.currentTarget)}>
+              {nameOf(thread.root.senderId) ?? '…'}
             </button>
-            <span className="msg-sender">{nameOf(thread.root.senderId) ?? '…'}</span>
             <span className="msg-time">{formatTime(thread.root.sentAt)}</span>
           </div>
           <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(thread.root.text) }} />

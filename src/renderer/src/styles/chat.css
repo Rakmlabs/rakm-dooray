@@ -16,32 +16,46 @@
   letter-spacing: -0.02em;
   user-select: none;
 }
-.avatar.tone-0 { --av-bg: #e3ecff; --av-fg: #2257e6; }
-.avatar.tone-1 { --av-bg: #ddf3ea; --av-fg: #17734d; }
-.avatar.tone-2 { --av-bg: #fde8dc; --av-fg: #b4501c; }
-.avatar.tone-3 { --av-bg: #efe4fb; --av-fg: #7040b8; }
-.avatar.tone-4 { --av-bg: #fce3e8; --av-fg: #b42a4a; }
-.avatar.tone-5 { --av-bg: #dcf0f5; --av-fg: #146f86; }
-.avatar.tone-6 { --av-bg: #f6eccd; --av-fg: #86620a; }
-.avatar.tone-7 { --av-bg: #e6e9ee; --av-fg: #4e5968; }
+/* 사람마다 다른 이름 색 (nameColor.ts). 라이트는 흰 바탕에서 4.5:1 이상 */
+.nc-0 { --nc: #d1242f; }
+.nc-1 { --nc: #0a66d8; }
+.nc-2 { --nc: #1a7f37; }
+.nc-3 { --nc: #c25100; }
+.nc-4 { --nc: #8250df; }
+.nc-5 { --nc: #0b7f8a; }
+.nc-6 { --nc: #c2185b; }
+.nc-7 { --nc: #8a6d00; }
+.nc-8 { --nc: #795548; }
+.nc-9 { --nc: #283593; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .avatar.tone-0 { --av-bg: #1f3160; --av-fg: #a9c2ff; }
-  :root:not([data-theme='light']) .avatar.tone-1 { --av-bg: #173b2e; --av-fg: #8fe0bf; }
-  :root:not([data-theme='light']) .avatar.tone-2 { --av-bg: #45281a; --av-fg: #f7b48e; }
-  :root:not([data-theme='light']) .avatar.tone-3 { --av-bg: #33254d; --av-fg: #cfb3f5; }
-  :root:not([data-theme='light']) .avatar.tone-4 { --av-bg: #47202b; --av-fg: #f5a6b8; }
-  :root:not([data-theme='light']) .avatar.tone-5 { --av-bg: #173a44; --av-fg: #92d6e8; }
-  :root:not([data-theme='light']) .avatar.tone-6 { --av-bg: #3e3217; --av-fg: #e9cd7f; }
-  :root:not([data-theme='light']) .avatar.tone-7 { --av-bg: #2a323d; --av-fg: #c3cad3; }
+  :root:not([data-theme='light']) .nc-0 { --nc: #ff6b6b; }
+  :root:not([data-theme='light']) .nc-1 { --nc: #5ea2ff; }
+  :root:not([data-theme='light']) .nc-2 { --nc: #4cc76a; }
+  :root:not([data-theme='light']) .nc-3 { --nc: #ff9a3c; }
+  :root:not([data-theme='light']) .nc-4 { --nc: #b18cff; }
+  :root:not([data-theme='light']) .nc-5 { --nc: #2ec4c9; }
+  :root:not([data-theme='light']) .nc-6 { --nc: #ff6fae; }
+  :root:not([data-theme='light']) .nc-7 { --nc: #e3b341; }
+  :root:not([data-theme='light']) .nc-8 { --nc: #d0a58a; }
+  :root:not([data-theme='light']) .nc-9 { --nc: #8c9eff; }
 }
-:root[data-theme='dark'] .avatar.tone-0 { --av-bg: #1f3160; --av-fg: #a9c2ff; }
-:root[data-theme='dark'] .avatar.tone-1 { --av-bg: #173b2e; --av-fg: #8fe0bf; }
-:root[data-theme='dark'] .avatar.tone-2 { --av-bg: #45281a; --av-fg: #f7b48e; }
-:root[data-theme='dark'] .avatar.tone-3 { --av-bg: #33254d; --av-fg: #cfb3f5; }
-:root[data-theme='dark'] .avatar.tone-4 { --av-bg: #47202b; --av-fg: #f5a6b8; }
-:root[data-theme='dark'] .avatar.tone-5 { --av-bg: #173a44; --av-fg: #92d6e8; }
-:root[data-theme='dark'] .avatar.tone-6 { --av-bg: #3e3217; --av-fg: #e9cd7f; }
-:root[data-theme='dark'] .avatar.tone-7 { --av-bg: #2a323d; --av-fg: #c3cad3; }
+:root[data-theme='dark'] .nc-0 { --nc: #ff6b6b; }
+:root[data-theme='dark'] .nc-1 { --nc: #5ea2ff; }
+:root[data-theme='dark'] .nc-2 { --nc: #4cc76a; }
+:root[data-theme='dark'] .nc-3 { --nc: #ff9a3c; }
+:root[data-theme='dark'] .nc-4 { --nc: #b18cff; }
+:root[data-theme='dark'] .nc-5 { --nc: #2ec4c9; }
+:root[data-theme='dark'] .nc-6 { --nc: #ff6fae; }
+:root[data-theme='dark'] .nc-7 { --nc: #e3b341; }
+:root[data-theme='dark'] .nc-8 { --nc: #d0a58a; }
+:root[data-theme='dark'] .nc-9 { --nc: #8c9eff; }
+.who {
+  color: var(--nc);
+}
+.avatar[class*='nc-'] {
+  --av-bg: var(--nc);
+  --av-fg: var(--panel);
+}
 
 .avatar-btn {
   border: 0;
@@ -104,8 +118,8 @@
   background: none;
   padding: 0;
   font: inherit;
-  font-weight: 700;
-  color: var(--fg);
+  font-weight: 800;
+  color: var(--nc, var(--fg));
   cursor: pointer;
 }
 .msg-head .msg-sender:hover:not(:disabled) {
@@ -115,9 +129,6 @@
 .msg-head .msg-sender:disabled {
   opacity: 1;
   cursor: default;
-}
-.msg.mine .msg-head .msg-sender {
-  color: var(--accent);
 }
 .msg.highlight {
   background: var(--accent-weak);
@@ -1640,4 +1651,16 @@ button.danger-btn:disabled {
 .avatar.photo {
   object-fit: cover;
   background: var(--panel-2);
+}
+.thread-root-head .msg-sender {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+.thread-root-head .msg-sender:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
 }
