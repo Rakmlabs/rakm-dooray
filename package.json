@@ -1,6 +1,6 @@
 {
   "name": "dooray-client",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "license": "MIT",
   "description": "RAKM 두레이 — NHN Dooray 커스텀 데스크톱 클라이언트 (메신저, 위키)",

@@ -14,6 +14,8 @@ import { useUploadHold } from './files/uploadQueue'
 import { ALBUM_GAP_MS, PhotoAlbum, isAlbumPhoto } from './files/PhotoAlbum'
 import { arrivedPending, localId, removePending, rowKeyOf, usePending, type PendingSend } from './chat/pendingStore'
 import { Avatar } from './people/Avatar'
+import { EmojiPicker } from './chat/EmojiPicker'
+import { QUICK_REACTIONS, applyOptimistic, foldReactions, reactionText, settled, type OptimisticReaction, type ReactionGroup } from './chat/reactions'
 import { useProfileCard } from './people/ProfileCard'
 import { ChatIcon } from './chat/ChatIcon'
 import { closeOpenFence, insideCodeFence } from './chat/composerText'
@@ -173,6 +175,8 @@ interface Actions {
   toggleBookmark: (m: Message) => void
   sendToWiki: (m: Message) => void
   setEditing: (id: string | null) => void
+  /** 이모지 반응 달기/빼기 (이미 단 것이면 뺀다) */
+  react: (m: Message, emoji: string) => void
 }
 
 export function MessageList(props: Props) {
@@ -204,15 +208,6 @@ export function MessageList(props: Props) {
   /** 맨 아래에서 꽤 떨어져 있음 → "최근 메시지로" 버튼 */
   const [farFromBottom, setFarFromBottom] = useState(false)
 
-  // "여기까지 읽음": 표시 시각 이후 처음 온 남의 메시지 앞
-  const markerId = useMemo(() => {
-    if (!readMarkerAt) return null
-    const at = Date.parse(readMarkerAt)
-    if (Number.isNaN(at)) return null
-    const first = messages.find((m) => m.sentAt && Date.parse(m.sentAt) > at && m.senderId !== meId)
-    return first?.id ?? null
-  }, [messages, readMarkerAt, meId])
-
   // 보내는 중인 내 메시지: 진짜 메시지와 같은 줄로 맨 아래에 붙인다 (같은 묶기·날짜 규칙, 같은 모양·높이).
   // 목록에 들어온 것은 이 렌더에서 바로 빼서 둘이 함께 보이는 순간이 없게 한다
   // 이 방에 첨부를 올리는 중이면, 올리기 시작한 뒤 들어온 내 첨부는 다 끝날 때까지 그리지 않는다 (앨범이 한 장씩 자라며 격자가 바뀌지 않게)
@@ -235,7 +230,33 @@ export function MessageList(props: Props) {
     () => (shownPending.length ? [...shownMessages, ...shownPending.map((p) => pendingMessage(p, meId, channelId))] : shownMessages),
     [shownMessages, shownPending, meId, channelId]
   )
-  const rows = useMemo(() => buildRows(withPending, markerId), [withPending, markerId])
+  // 이모지 반응 줄은 목록에서 빼고 대상 메시지 아래 칩으로 모은다
+  const folded = useMemo(() => foldReactions(withPending, meId), [withPending, meId])
+  /** 반응 줄을 뺀 서버 목록 (새 메시지·스크롤 판단용: 반응이 와도 맨 아래로 끌려가거나 "새 메시지" 가 늘지 않게) */
+  const base = useMemo(() => (folded.hidden.size ? messages.filter((m) => !folded.hidden.has(m.id)) : messages), [messages, folded.hidden])
+  // "여기까지 읽음": 표시 시각 이후 처음 온 남의 메시지 앞
+  const markerId = useMemo(() => {
+    if (!readMarkerAt) return null
+    const at = Date.parse(readMarkerAt)
+    if (Number.isNaN(at)) return null
+    const first = base.find((m) => m.sentAt && Date.parse(m.sentAt) > at && m.senderId !== meId)
+    return first?.id ?? null
+  }, [base, readMarkerAt, meId])
+  const rows = useMemo(() => buildRows(folded.list, markerId), [folded.list, markerId])
+
+  // 누른 반응은 서버 목록에 들어오기 전에도 바로 보이게 덧씌운다 (들어오면, 또는 20초가 지나면 걷는다)
+  const [optimistic, setOptimistic] = useState<OptimisticReaction[]>([])
+  useEffect(() => {
+    if (!optimistic.length) return
+    const now = Date.now()
+    const left = optimistic.filter((o) => now - o.at < 20_000 && !settled(o, folded.byTarget.get(o.target), meId))
+    if (left.length !== optimistic.length) setOptimistic(left)
+    else {
+      const t = window.setTimeout(() => setOptimistic((cur) => cur.filter((o) => Date.now() - o.at < 20_000)), 20_000)
+      return () => window.clearTimeout(t)
+    }
+  }, [optimistic, folded.byTarget, meId])
+  const reactionsOf = (id: string) => applyOptimistic(folded.byTarget.get(id), optimistic, id, meId)
 
   // ---------- 그릴 범위 (아래에서부터 windowRows 줄) ----------
   const [windowRows, setWindowRows] = useState(WINDOW_ROWS)
@@ -311,7 +332,7 @@ export function MessageList(props: Props) {
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el) return
-    const last = messages[messages.length - 1]
+    const last = base[base.length - 1]
     const appended = !!last && last.id !== lastId.current && lastCount.current > 0
     const mineNew = (appended && !!meId && last.senderId === meId) || pending.length > lastPending.current
     if (mineNew && below > 0) {
@@ -324,14 +345,14 @@ export function MessageList(props: Props) {
       stickToBottom.current = true
       setUnseen(0)
     } else if (appended) {
-      const prev = lastId.current ? messages.findIndex((m) => m.id === lastId.current) : -1
-      const added = prev >= 0 ? messages.slice(prev + 1).filter((m) => m.senderId !== meId).length : 1
+      const prev = lastId.current ? base.findIndex((m) => m.id === lastId.current) : -1
+      const added = prev >= 0 ? base.slice(prev + 1).filter((m) => m.senderId !== meId).length : 1
       if (added > 0) setUnseen((n) => n + added)
     }
-    lastCount.current = messages.length
+    lastCount.current = base.length
     lastId.current = last?.id ?? null
     lastPending.current = pending.length
-  }, [messages, meId, pending.length])
+  }, [base, meId, pending.length])
 
   // 입력창이 자라거나 이미지·미리보기 카드가 늦게 그려져 높이가 바뀌어도, 맨 아래를 보고 있었다면 맨 아래에 붙어 있게
   useEffect(() => {
@@ -440,8 +461,9 @@ export function MessageList(props: Props) {
   }, [props.highlightId, reveal])
 
   // 항목에 넘기는 동작은 한 번만 만든다 (최신 props 는 ref 로 읽는다)
-  const latest = useRef({ props, toast, bookmarks, rich, jumpTo })
-  latest.current = { props, toast, bookmarks, rich, jumpTo }
+  const nameOfMember = useMemberNames()
+  const latest = useRef({ props, toast, bookmarks, rich, jumpTo, nameOfMember, meId, reactionsOf })
+  latest.current = { props, toast, bookmarks, rich, jumpTo, nameOfMember, meId, reactionsOf }
   const act = useMemo<Actions>(
     () => ({
       reply: (m) => {
@@ -463,7 +485,29 @@ export function MessageList(props: Props) {
         }
       },
       sendToWiki: (m) => setWikiSend(m),
-      setEditing: (id) => setEditingId(id)
+      setEditing: (id) => setEditingId(id),
+      react: async (m, emoji) => {
+        const { props: p, toast: t, nameOfMember: nameOf, meId: me, reactionsOf: groupsOf } = latest.current
+        if (!me) return
+        const g = groupsOf(m.id)?.find((x) => x.emoji === emoji)
+        const on = !!g?.by.includes(me)
+        if (on && g && !g.mine.length) return // 방금 누른 것이 아직 서버에 들어가는 중
+        const op: OptimisticReaction = { target: m.id, emoji, op: on ? 'remove' : 'add', at: Date.now() }
+        setOptimistic((cur) => [...cur.filter((o) => !(o.target === m.id && o.emoji === emoji)), op])
+        const undo = () => setOptimistic((cur) => cur.filter((o) => o !== op))
+        try {
+          if (on) {
+            for (const id of g!.mine) await call('messenger:delete', m.channelId, id)
+          } else {
+            await call('messenger:send', m.channelId, reactionText(emoji, m.senderType === 'app' ? '봇' : (nameOf(m.senderId) ?? ''), m))
+          }
+          p.onChanged()
+        } catch (e) {
+          undo()
+          t(on ? `반응을 빼지 못했습니다 — ${deleteReasonHint(errorText(e))}` : `반응을 달지 못했습니다 — ${errorText(e)}`)
+          p.onChanged()
+        }
+      }
     }),
     []
   )
@@ -541,6 +585,8 @@ export function MessageList(props: Props) {
               replyRef={r.m.type === 'REPLY' ? (replyRefs.get(r.m.id) ?? null) : null}
               isBookmarked={bookmarked.has(bookmarkKey(r.m))}
               pending={pendingById.get(r.m.id)}
+              reactions={pendingById.has(r.m.id) ? undefined : reactionsOf(r.m.id)}
+              meId={meId}
               act={act}
             />
           )}
@@ -710,6 +756,8 @@ interface ItemProps {
   isBookmarked: boolean
   /** 보내는 중인 내 메시지 (낙관적 전송) */
   pending?: PendingSend
+  reactions?: ReactionGroup[]
+  meId: string | null
   act: Actions
 }
 
@@ -734,6 +782,8 @@ const MessageItem = memo(function MessageItem({
   replyRef,
   isBookmarked,
   pending,
+  reactions,
+  meId,
   act
 }: ItemProps) {
   const unreadIds = unreadKey ? unreadKey.split(',') : NO_IDS
@@ -743,6 +793,7 @@ const MessageItem = memo(function MessageItem({
   const { toast } = useApp()
   const [draft, setDraft] = useState(m.text)
   const [busy, setBusy] = useState(false)
+  const [picking, setPicking] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -878,7 +929,42 @@ const MessageItem = memo(function MessageItem({
             {m.thread.lastUpdatedAt && <span className="muted">· {formatTime(m.thread.lastUpdatedAt)}</span>}
           </button>
         )}
+        {reactions && !deleted && (
+          <div className="reactions" role="group" aria-label="반응">
+            {reactions.map((g) => {
+              const on = !!meId && g.by.includes(meId)
+              const who = g.by.map((id) => (id === meId ? '나' : (nameOf(id) ?? '…'))).join(', ')
+              return (
+                <button
+                  key={g.emoji}
+                  className={`reaction ${on ? 'on' : ''}`}
+                  aria-pressed={on}
+                  title={`${g.emoji} ${who}${on ? ' · 다시 누르면 빼기' : ''}`}
+                  aria-label={`${g.emoji} ${g.by.length}명: ${who}`}
+                  onClick={() => act.react(m, g.emoji)}
+                >
+                  <span className="reaction-emoji">{g.emoji}</span>
+                  <span className="reaction-count">{g.by.length}</span>
+                </button>
+              )
+            })}
+            <button className="reaction-add emoji-toggle" title="반응 더하기" aria-label="반응 더하기" onClick={() => setPicking((v) => !v)}>
+              <ChatIcon name="smile" size={14} />
+            </button>
+          </div>
+        )}
       </div>
+      {picking && (
+        <div className="react-picker">
+          <EmojiPicker
+            onPick={(e) => {
+              setPicking(false)
+              act.react(m, e)
+            }}
+            onClose={() => setPicking(false)}
+          />
+        </div>
+      )}
       {unreadIds.length > 0 && !deleted && (
         <span
           className="receipt-unread"
@@ -904,6 +990,15 @@ const MessageItem = memo(function MessageItem({
       )}
       {!editing && !deleted && !pending && (
         <div className="msg-actions" role="toolbar" aria-label="메시지 동작">
+          {QUICK_REACTIONS.map((e) => (
+            <button key={e} className="quick-react" title={`${e} 반응`} aria-label={`${e} 반응`} onClick={() => act.react(m, e)}>
+              {e}
+            </button>
+          ))}
+          <button className="emoji-toggle" title="다른 이모지로 반응" aria-label="다른 이모지로 반응" onClick={() => setPicking((v) => !v)}>
+            <ChatIcon name="smile" size={15} />
+          </button>
+          <span className="msg-actions-sep" aria-hidden />
           {canReply && (
             <button title="답장" aria-label="답장" onClick={() => act.reply(m)}>
               <Icon name="reply" size={15} />

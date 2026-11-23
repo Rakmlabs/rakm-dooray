@@ -34,6 +34,7 @@ import { ChatIcon } from '../components/chat/ChatIcon'
 import { ThreadDeleteDialog, ThreadMenu, setThreadHidden, threadDeleteMessage, useHiddenThreads } from '../components/chat/threadActions'
 import { Modal } from '../components/Modal'
 import { Icon } from '../components/Icon'
+import { PaneCollapseButton, SidePane } from '../components/SidePane'
 import { Avatar } from '../components/people/Avatar'
 import { matchScore } from '../shell/match'
 import { pushRecent } from '../shell/recent'
@@ -278,7 +279,7 @@ export function MessengerView({ active }: { active: boolean }) {
 
   return (
     <div className="cols">
-      <aside className="list-col" aria-label="대화방 목록">
+      <SidePane id="messenger-list" label="대화방 목록" className="list-col" defaultWidth={300} min={200} max={480}>
         <div className="pane-head">
           <input
             className="search"
@@ -293,6 +294,7 @@ export function MessengerView({ active }: { active: boolean }) {
           <button className="icon-btn" title="새 대화방" aria-label="새 대화방" onClick={() => setDialog({ kind: 'newChannel' })}>
             <Icon name="plus" size={16} />
           </button>
+          <PaneCollapseButton />
         </div>
         {error && <div className="banner banner-err">{error}</div>}
         <div className="list-scroll" onDragEnd={() => (setDrag(null), setDropAt(null))}>
@@ -399,7 +401,7 @@ export function MessengerView({ active }: { active: boolean }) {
             )
           })}
         </div>
-      </aside>
+      </SidePane>
 
       <div className="body-col">
         {selection?.kind === 'channel' && selectedChannel && (

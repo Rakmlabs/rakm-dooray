@@ -1,4 +1,5 @@
 import { parseSystem, systemText } from '@shared/system-message'
+import { parseReaction } from '@shared/reaction'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import type { Message } from '@shared/types'
 import type { ChannelSummary, MessageHit, WikiHit, WikiIndexEntry } from '@shared/types-shell'
@@ -404,6 +405,8 @@ export function previewText(m: Message): string {
   const sys = parseSystem(m)
   if (sys) return systemText(sys)
   if (m.type === 'FILE' && m.file) return `[파일] ${m.file.name}`
+  const r = parseReaction(m.text)
+  if (r) return `${r.emoji} 반응 · 「${r.label}」`
   const t = stripMarkdown(m.text).replace(/\s+/g, ' ').trim()
   return t.length > 80 ? t.slice(0, 80) + '…' : t
 }

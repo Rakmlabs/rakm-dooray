@@ -7,6 +7,7 @@ import { useApp, useMemberNames } from '../state'
 import { renderMarkdown } from '../lib/markdown'
 import { formatSize, formatTime } from '../lib/format'
 import { Icon } from '../components/Icon'
+import { PaneCollapseButton, SidePane } from '../components/SidePane'
 import { Modal } from '../components/Modal'
 import { BlockEditor } from '../wiki/BlockEditor'
 import { buildDoc, serializeDoc, type BuiltDoc, type PMNode } from '../wiki/markdown-model'
@@ -177,10 +178,11 @@ export function WikiView() {
 
   return (
     <div className="cols wiki">
-      <aside className="wiki-list-col" aria-label="위키 목록">
+      <SidePane id="wiki-list" label="위키 목록" className="wiki-list-col" defaultWidth={216} min={160} max={400}>
         <div className="wiki-col-head">
           <span className="col-title">위키</span>
           <span className="muted small">{list.length}</span>
+          <PaneCollapseButton />
         </div>
         <div className="wiki-filter">
           <input className="search" placeholder="위키 찾기" value={wikiFilter} onChange={(e) => setWikiFilter(e.target.value)} />
@@ -204,8 +206,8 @@ export function WikiView() {
           ))}
           {wikis !== null && filteredWikis.length === 0 && <div className="muted small pad">{wikiFilter ? '맞는 위키가 없습니다.' : '볼 수 있는 위키가 없습니다.'}</div>}
         </nav>
-      </aside>
-      <aside className="tree-col" aria-label="페이지 목록">
+      </SidePane>
+      <SidePane id="wiki-tree" label="페이지 목록" className="tree-col" defaultWidth={284} min={180} max={560}>
         <div className="wiki-col-head">
           <span className="col-title ellipsis">{currentWiki?.name ?? '페이지'}</span>
           {wikiId && (
@@ -213,11 +215,12 @@ export function WikiView() {
               <Icon name="refresh" size={15} />
             </button>
           )}
+          <PaneCollapseButton />
         </div>
         <div className="list-scroll tree" role="tree">
           {wikiId ? renderTree(ROOT, 0) : <div className="muted small pad">왼쪽에서 위키를 고르세요.</div>}
         </div>
-      </aside>
+      </SidePane>
       <div className="body-col">
         {wikiId && pageId ? (
           <PageView

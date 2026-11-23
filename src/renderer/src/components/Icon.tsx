@@ -26,7 +26,9 @@ const PATHS = {
   user: 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8z M4 20a8 8 0 0 1 16 0',
   grip: 'M9 6h.01 M15 6h.01 M9 12h.01 M15 12h.01 M9 18h.01 M15 18h.01',
   offline: 'M2 8a15 15 0 0 1 20 0 M5 12a10 10 0 0 1 14 0 M8.5 15.5a5 5 0 0 1 7 0 M12 19h.01 M3 3l18 18',
-  page: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h5'
+  page: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h5',
+  panelClose: 'M4 4h16v16H4z M10 4v16 M16 10l-2 2 2 2',
+  panelOpen: 'M4 4h16v16H4z M10 4v16 M14 10l2 2-2 2'
 } as const
 
 export type IconName = keyof typeof PATHS

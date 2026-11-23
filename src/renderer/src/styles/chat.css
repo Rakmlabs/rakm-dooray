@@ -1565,3 +1565,79 @@ button.danger-btn:disabled {
   font-weight: 400;
   font-size: 12px;
 }
+
+/* ---------- 이모지 반응 (반응 줄은 메시지로 보내고, 이 앱은 대상 아래 칩으로 모은다) ---------- */
+.msg-actions .quick-react {
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 5px;
+  border-radius: 5px;
+}
+.msg-actions .quick-react:hover {
+  background: var(--hover);
+}
+.msg-actions-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 2px;
+  background: var(--line);
+}
+.reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.reaction,
+.reaction-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--body);
+  font-size: 12px;
+  line-height: 1;
+}
+.reaction:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+.reaction.on {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+.reaction-emoji {
+  font-size: 14px;
+}
+.reaction-count {
+  font-variant-numeric: tabular-nums;
+}
+.reaction-add {
+  padding: 0 7px;
+  color: var(--muted);
+  border-style: dashed;
+  background: transparent;
+  visibility: hidden;
+}
+.msg:hover .reaction-add,
+.reaction-add:focus-visible {
+  visibility: visible;
+}
+.react-picker {
+  position: absolute;
+  right: 12px;
+  top: 22px;
+  z-index: 30;
+}
+.react-picker .emoji-picker {
+  position: static;
+}
+.avatar.photo {
+  object-fit: cover;
+  background: var(--panel-2);
+}
